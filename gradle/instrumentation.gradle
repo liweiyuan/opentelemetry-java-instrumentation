@@ -63,10 +63,10 @@ afterEvaluate {
     bootstrapRuntime(project(path: ":javaagent-bootstrap", configuration: 'instrumentationMuzzle'))
   }
 
-  def pluginName = 'io.opentelemetry.javaagent.tooling.muzzle.collector.MuzzleCodeGenerationPlugin'
+ /* def pluginName = 'io.opentelemetry.javaagent.tooling.muzzle.collector.MuzzleCodeGenerationPlugin'
   new ByteBuddyPluginConfigurator(project, sourceSets.main, pluginName,
     configurations.toolingRuntime + configurations.runtimeClasspath
-  ).configure()
+  ).configure()*/
 }
 
 configurations {
