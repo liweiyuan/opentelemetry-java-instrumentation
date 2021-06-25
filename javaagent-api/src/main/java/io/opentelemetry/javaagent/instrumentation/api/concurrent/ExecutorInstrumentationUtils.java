@@ -6,13 +6,12 @@
 package io.opentelemetry.javaagent.instrumentation.api.concurrent;
 
 import io.opentelemetry.context.Context;
-import io.opentelemetry.instrumentation.api.context.ContextPropagationDebug;
+import io.opentelemetry.instrumentation.api.internal.ContextPropagationDebug;
 import io.opentelemetry.javaagent.instrumentation.api.ContextStore;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import io.opentelemetry.javaagent.instrumentation.api.internal.InstrumentedTaskClasses;
 
 /** Utils for concurrent instrumentations. */
-public class ExecutorInstrumentationUtils {
+public final class ExecutorInstrumentationUtils {
 
   /**
    * Checks if given task should get state attached.
@@ -25,25 +24,13 @@ public class ExecutorInstrumentationUtils {
       return false;
     }
 
-    Class<?> taskClass = task.getClass();
-    Class<?> enclosingClass = taskClass.getEnclosingClass();
+    if (Context.current() == Context.root()) {
+      // not much point in propagating root context
+      // plus it causes failures under otel.javaagent.testing.fail-on-context-leak=true
+      return false;
+    }
 
-    // not much point in propagating root context
-    // plus it causes failures under otel.javaagent.testing.fail-on-context-leak=true
-    return Context.current() != Context.root()
-        // TODO Workaround for
-        // https://github.com/open-telemetry/opentelemetry-java-instrumentation/issues/787
-        && !taskClass.getName().equals("org.apache.tomcat.util.net.NioEndpoint$SocketProcessor")
-        // Avoid context leak on jetty. Runnable submitted from SelectChannelEndPoint is used to
-        // process a new request which should not have context from them current request.
-        && (enclosingClass == null
-            || !enclosingClass.getName().equals("org.eclipse.jetty.io.nio.SelectChannelEndPoint"))
-        // Don't instrument the executor's own runnables. These runnables may never return until
-        // netty shuts down.
-        && (enclosingClass == null
-            || !enclosingClass
-                .getName()
-                .equals("io.netty.util.concurrent.SingleThreadEventExecutor"));
+    return InstrumentedTaskClasses.canInstrumentTaskClass(task.getClass());
   }
 
   /**
@@ -58,12 +45,8 @@ public class ExecutorInstrumentationUtils {
   public static <T> State setupState(ContextStore<T, State> contextStore, T task, Context context) {
     State state = contextStore.putIfAbsent(task, State.FACTORY);
     if (ContextPropagationDebug.isThreadPropagationDebuggerEnabled()) {
-      List<StackTraceElement[]> locations = ContextPropagationDebug.getLocations(context);
-      if (locations == null) {
-        locations = new CopyOnWriteArrayList<>();
-        context = ContextPropagationDebug.withLocations(locations, context);
-      }
-      locations.add(0, new Exception().getStackTrace());
+      context =
+          ContextPropagationDebug.appendLocations(context, new Exception().getStackTrace(), task);
     }
     state.setParentContext(context);
     return state;
@@ -88,4 +71,6 @@ public class ExecutorInstrumentationUtils {
       state.clearParentContext();
     }
   }
+
+  private ExecutorInstrumentationUtils() {}
 }

@@ -5,17 +5,24 @@
 
 package muzzle
 
-import static io.opentelemetry.javaagent.tooling.muzzle.Reference.Flag.ManifestationFlag
-import static io.opentelemetry.javaagent.tooling.muzzle.Reference.Flag.MinimumVisibilityFlag
-import static io.opentelemetry.javaagent.tooling.muzzle.Reference.Flag.OwnershipFlag
-import static io.opentelemetry.javaagent.tooling.muzzle.Reference.Flag.VisibilityFlag
+
+import static io.opentelemetry.javaagent.extension.muzzle.Flag.ManifestationFlag
+import static io.opentelemetry.javaagent.extension.muzzle.Flag.MinimumVisibilityFlag
+import static io.opentelemetry.javaagent.extension.muzzle.Flag.OwnershipFlag
+import static io.opentelemetry.javaagent.extension.muzzle.Flag.VisibilityFlag
 import static muzzle.TestClasses.HelperAdvice
 import static muzzle.TestClasses.LdcAdvice
 import static muzzle.TestClasses.MethodBodyAdvice
 
+import external.instrumentation.ExternalHelper
+import io.opentelemetry.context.Context
+import io.opentelemetry.instrumentation.InstrumentationContextTestClasses
 import io.opentelemetry.instrumentation.OtherTestHelperClasses
 import io.opentelemetry.instrumentation.TestHelperClasses
-import io.opentelemetry.javaagent.tooling.muzzle.Reference
+import io.opentelemetry.javaagent.extension.muzzle.ClassRef
+import io.opentelemetry.javaagent.extension.muzzle.FieldRef
+import io.opentelemetry.javaagent.extension.muzzle.Flag
+import io.opentelemetry.javaagent.tooling.muzzle.collector.MuzzleCompilationException
 import io.opentelemetry.javaagent.tooling.muzzle.collector.ReferenceCollector
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -23,8 +30,9 @@ import spock.lang.Unroll
 class ReferenceCollectorTest extends Specification {
   def "method body creates references"() {
     setup:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(MethodBodyAdvice.name)
+    collector.prune()
     def references = collector.getReferences()
 
     expect:
@@ -69,8 +77,9 @@ class ReferenceCollectorTest extends Specification {
 
   def "protected ref test"() {
     setup:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(MethodBodyAdvice.B2.name)
+    collector.prune()
     def references = collector.getReferences()
 
     expect:
@@ -81,8 +90,9 @@ class ReferenceCollectorTest extends Specification {
 
   def "ldc creates references"() {
     setup:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(LdcAdvice.name)
+    collector.prune()
     def references = collector.getReferences()
 
     expect:
@@ -91,8 +101,9 @@ class ReferenceCollectorTest extends Specification {
 
   def "instanceof creates references"() {
     setup:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(TestClasses.InstanceofAdvice.name)
+    collector.prune()
     def references = collector.getReferences()
 
     expect:
@@ -101,8 +112,9 @@ class ReferenceCollectorTest extends Specification {
 
   def "invokedynamic creates references"() {
     setup:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(TestClasses.InvokeDynamicAdvice.name)
+    collector.prune()
     def references = collector.getReferences()
 
     expect:
@@ -112,7 +124,7 @@ class ReferenceCollectorTest extends Specification {
 
   def "should create references for helper classes"() {
     when:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(HelperAdvice.name)
     def references = collector.getReferences()
 
@@ -144,10 +156,34 @@ class ReferenceCollectorTest extends Specification {
     }
   }
 
+  def "should collect field declaration references"() {
+    when:
+    def collector = new ReferenceCollector({ it == DeclaredFieldTestClass.Helper.name })
+    collector.collectReferencesFromAdvice(DeclaredFieldTestClass.Advice.name)
+    collector.prune()
+    def references = collector.references
+
+    then:
+    println references
+
+    with(references[DeclaredFieldTestClass.Helper.name]) { helperClass ->
+      def superField = findField(helperClass, 'superField')
+      !superField.declared
+
+      def field = findField(helperClass, 'helperField')
+      field.declared
+    }
+
+    with(references[DeclaredFieldTestClass.LibraryBaseClass.name]) { libraryBaseClass ->
+      libraryBaseClass.fields.empty
+    }
+  }
+
   def "should find all helper classes"() {
     when:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(HelperAdvice.name)
+    collector.prune()
     def helperClasses = collector.getSortedHelperClasses()
 
     then:
@@ -163,9 +199,10 @@ class ReferenceCollectorTest extends Specification {
 
   def "should correctly find helper classes from multiple advice classes"() {
     when:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromAdvice(TestClasses.HelperAdvice.name)
     collector.collectReferencesFromAdvice(TestClasses.HelperOtherAdvice.name)
+    collector.prune()
     def helperClasses = collector.getSortedHelperClasses()
 
     then:
@@ -193,19 +230,27 @@ class ReferenceCollectorTest extends Specification {
     ])
   }
 
+  def "should correctly find external instrumentation classes"() {
+    when:
+    def collector = new ReferenceCollector({ it.startsWith("external.instrumentation") })
+    collector.collectReferencesFromAdvice(TestClasses.ExternalInstrumentationAdvice.name)
+    collector.prune()
+
+    then: "should collect references"
+    def references = collector.getReferences()
+    references['external.NotInstrumentation'] != null
+
+    then: "should collect helper classes"
+    def helperClasses = collector.getSortedHelperClasses()
+    helperClasses == [ExternalHelper.name]
+  }
+
   @Unroll
   def "should collect helper classes from resource file #desc"() {
     when:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromResource(resource)
-
-    then: "SPI classes are collected as references"
-    def references = collector.references
-    references.keySet() == [
-      TestHelperClasses.Helper.name,
-      TestHelperClasses.HelperSuperClass.name,
-      TestHelperClasses.HelperInterface.name
-    ] as Set
+    collector.prune()
 
     then: "SPI classes are included in helper classes"
     def helperClasses = collector.sortedHelperClasses
@@ -219,57 +264,90 @@ class ReferenceCollectorTest extends Specification {
     ]
 
     where:
-    desc                                               | resource
-    "Java SPI"                                         | "META-INF/services/test.resource.file"
-    "AWS SDK global interceptors file"                 | "software/amazon/awssdk/global/handlers/execution.interceptors"
-    "AWS SDK service interceptors file"                | "software/amazon/awssdk/services/testservice/execution.interceptors"
-    "AWS SDK service (second level) interceptors file" | "software/amazon/awssdk/services/testservice/testsubservice/execution.interceptors"
+    desc                                                  | resource
+    "Java SPI"                                            | "META-INF/services/test.resource.file"
+    "AWS SDK v2 global interceptors file"                 | "software/amazon/awssdk/global/handlers/execution.interceptors"
+    "AWS SDK v2 service interceptors file"                | "software/amazon/awssdk/services/testservice/execution.interceptors"
+    "AWS SDK v2 service (second level) interceptors file" | "software/amazon/awssdk/services/testservice/testsubservice/execution.interceptors"
+    "AWS SDK v1 global interceptors file"                 | "com/amazonaws/global/handlers/request.handler2s"
+    "AWS SDK v1 service interceptors file"                | "com/amazonaws/services/testservice/request.handler2s"
+    "AWS SDK v1 service (second level) interceptors file" | "com/amazonaws/services/testservice/testsubservice/request.handler2s"
   }
 
   def "should ignore arbitrary resource file"() {
     when:
-    def collector = new ReferenceCollector()
+    def collector = new ReferenceCollector({ false })
     collector.collectReferencesFromResource("application.properties")
+    collector.prune()
 
     then:
     collector.references.isEmpty()
     collector.sortedHelperClasses.isEmpty()
   }
 
-  private static assertHelperSuperClassMethod(Reference reference, boolean isAbstract) {
+  def "should collect context store classes"() {
+    when:
+    def collector = new ReferenceCollector({ false })
+    collector.collectReferencesFromAdvice(InstrumentationContextTestClasses.ValidAdvice.name)
+    collector.prune()
+
+    then:
+    def contextStore = collector.getContextStoreClasses()
+    contextStore == [
+      (InstrumentationContextTestClasses.Key1.name): Context.name,
+      (InstrumentationContextTestClasses.Key2.name): Context.name
+    ]
+  }
+
+  def "should not collect context store classes for invalid scenario: #desc"() {
+    when:
+    def collector = new ReferenceCollector({ false })
+    collector.collectReferencesFromAdvice(adviceClassName)
+    collector.prune()
+
+    then:
+    thrown(MuzzleCompilationException)
+
+    where:
+    desc                                                                        | adviceClassName
+    "passing arbitrary variables or parameters to InstrumentationContext.get()" | InstrumentationContextTestClasses.NotUsingClassRefAdvice.name
+    "storing class ref in a local var"                                          | InstrumentationContextTestClasses.PassingVariableAdvice.name
+  }
+
+  private static assertHelperSuperClassMethod(ClassRef reference, boolean isAbstract) {
     assertMethod reference, 'abstractMethod', '()I',
       VisibilityFlag.PROTECTED,
       OwnershipFlag.NON_STATIC,
       isAbstract ? ManifestationFlag.ABSTRACT : ManifestationFlag.NON_FINAL
   }
 
-  private static assertHelperInterfaceMethod(Reference reference, boolean isAbstract) {
+  private static assertHelperInterfaceMethod(ClassRef reference, boolean isAbstract) {
     assertMethod reference, 'foo', '()V',
       VisibilityFlag.PUBLIC,
       OwnershipFlag.NON_STATIC,
       isAbstract ? ManifestationFlag.ABSTRACT : ManifestationFlag.NON_FINAL
   }
 
-  private static assertMethod(Reference reference, String methodName, String methodDesc, Reference.Flag... flags) {
+  private static assertMethod(ClassRef reference, String methodName, String methodDesc, Flag... flags) {
     def method = findMethod reference, methodName, methodDesc
     method != null && (method.flags == flags as Set)
   }
 
-  private static findMethod(Reference reference, String methodName, String methodDesc) {
+  private static findMethod(ClassRef reference, String methodName, String methodDesc) {
     for (def method : reference.methods) {
-      if (method == new Reference.Method(methodName, methodDesc)) {
+      if (method.name == methodName && method.descriptor == methodDesc) {
         return method
       }
     }
     return null
   }
 
-  private static assertField(Reference reference, String fieldName, Reference.Flag... flags) {
+  private static assertField(ClassRef reference, String fieldName, Flag... flags) {
     def field = findField reference, fieldName
     field != null && (field.flags == flags as Set)
   }
 
-  private static Reference.Field findField(Reference reference, String fieldName) {
+  private static FieldRef findField(ClassRef reference, String fieldName) {
     for (def field : reference.fields) {
       if (field.name == fieldName) {
         return field

@@ -20,6 +20,11 @@ public final class ServerSpan {
   private static final ContextKey<Span> KEY =
       ContextKey.named("opentelemetry-traces-server-span-key");
 
+  /** Returns true when a {@link SpanKind#SERVER} span is present in the passed {@code context}. */
+  public static boolean exists(Context context) {
+    return fromContextOrNull(context) != null;
+  }
+
   /**
    * Returns span of type {@link SpanKind#SERVER} from the given context or {@code null} if not
    * found.
@@ -29,7 +34,7 @@ public final class ServerSpan {
     return context.get(KEY);
   }
 
-  static Context with(Context context, Span serverSpan) {
+  public static Context with(Context context, Span serverSpan) {
     return context.with(KEY, serverSpan);
   }
 

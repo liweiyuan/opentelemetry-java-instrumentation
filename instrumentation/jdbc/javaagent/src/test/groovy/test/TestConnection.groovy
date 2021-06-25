@@ -29,7 +29,7 @@ import java.util.concurrent.Executor
 class TestConnection implements Connection {
   TestConnection(boolean throwException) {
     if (throwException) {
-      throw new RuntimeException("connection exception")
+      throw new IllegalStateException("connection exception")
     }
   }
 
@@ -41,7 +41,7 @@ class TestConnection implements Connection {
 
   @Override
   PreparedStatement prepareStatement(String sql) throws SQLException {
-    return null
+    return new TestPreparedStatement(this)
   }
 
   @Override

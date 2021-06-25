@@ -28,10 +28,7 @@ public class KafkaConsumerTracer extends BaseTracer {
 
     Context parentContext = extractParent(record);
     Span span =
-        tracer
-            .spanBuilder(spanNameOnConsume(record))
-            .setSpanKind(CONSUMER)
-            .setParent(parentContext)
+        spanBuilder(parentContext, spanNameOnConsume(record), CONSUMER)
             .setStartTimestamp(now, TimeUnit.MILLISECONDS)
             .setAttribute(SemanticAttributes.MESSAGING_SYSTEM, "kafka")
             .setAttribute(SemanticAttributes.MESSAGING_DESTINATION, record.topic())
@@ -43,7 +40,7 @@ public class KafkaConsumerTracer extends BaseTracer {
             .startSpan();
 
     onConsume(span, now, record);
-    return parentContext.with(span);
+    return withConsumerSpan(parentContext, span);
   }
 
   private Context extractParent(ConsumerRecord<?, ?> record) {

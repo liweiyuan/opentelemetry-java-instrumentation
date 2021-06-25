@@ -5,19 +5,15 @@
 
 package io.opentelemetry.javaagent.instrumentation.awssdk.v1_11;
 
-import static java.util.Collections.singletonMap;
 import static net.bytebuddy.matcher.ElementMatchers.declaresField;
 import static net.bytebuddy.matcher.ElementMatchers.isConstructor;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
-import com.amazonaws.AmazonWebServiceRequest;
 import com.amazonaws.handlers.RequestHandler2;
-import io.opentelemetry.javaagent.instrumentation.api.InstrumentationContext;
-import io.opentelemetry.javaagent.tooling.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
 import java.util.List;
-import java.util.Map;
 import net.bytebuddy.asm.Advice;
-import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 
@@ -34,12 +30,14 @@ public class AwsClientInstrumentation implements TypeInstrumentation {
   }
 
   @Override
-  public Map<? extends ElementMatcher<? super MethodDescription>, String> transformers() {
-    return singletonMap(
+  public void transform(TypeTransformer transformer) {
+    transformer.applyAdviceToMethod(
         isConstructor(), AwsClientInstrumentation.class.getName() + "$AwsClientAdvice");
   }
 
+  @SuppressWarnings("unused")
   public static class AwsClientAdvice {
+
     // Since we're instrumenting the constructor, we can't add onThrowable.
     @Advice.OnMethodExit(suppress = Throwable.class)
     public static void addHandler(
@@ -52,9 +50,7 @@ public class AwsClientInstrumentation implements TypeInstrumentation {
         }
       }
       if (!hasAgentHandler) {
-        handlers.add(
-            new TracingRequestHandler(
-                InstrumentationContext.get(AmazonWebServiceRequest.class, RequestMeta.class)));
+        handlers.add(new TracingRequestHandler());
       }
     }
   }

@@ -5,6 +5,7 @@
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
 import static io.opentelemetry.api.trace.SpanKind.SERVER
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.basicSpan
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderTrace
 
@@ -18,7 +19,7 @@ import rmi.app.Server
 import rmi.app.ServerLegacy
 
 class RmiTest extends AgentInstrumentationSpecification {
-  def registryPort = PortUtils.randomOpenPort()
+  def registryPort = PortUtils.findOpenPort()
   def serverRegistry = LocateRegistry.createRegistry(registryPort)
   def clientRegistry = LocateRegistry.getRegistry("localhost", registryPort)
 
@@ -99,7 +100,7 @@ class RmiTest extends AgentInstrumentationSpecification {
     }
 
     then:
-    def thrownException = thrown(RuntimeException)
+    def thrownException = thrown(IllegalStateException)
     assertTraces(1) {
       trace(0, 3) {
         basicSpan(it, 0, "parent", null, thrownException)
@@ -107,8 +108,8 @@ class RmiTest extends AgentInstrumentationSpecification {
           name "rmi.app.Greeter/exceptional"
           kind CLIENT
           childOf span(0)
-          errored true
-          errorEvent(RuntimeException, String)
+          status ERROR
+          errorEvent(IllegalStateException, String)
           attributes {
             "${SemanticAttributes.RPC_SYSTEM.key}" "java_rmi"
             "${SemanticAttributes.RPC_SERVICE.key}" "rmi.app.Greeter"
@@ -119,8 +120,8 @@ class RmiTest extends AgentInstrumentationSpecification {
         span(2) {
           name "rmi.app.Server/exceptional"
           kind SERVER
-          errored true
-          errorEvent(RuntimeException, String)
+          status ERROR
+          errorEvent(IllegalStateException, String)
           attributes {
             "${SemanticAttributes.RPC_SYSTEM.key}" "java_rmi"
             "${SemanticAttributes.RPC_SERVICE.key}" "rmi.app.Server"

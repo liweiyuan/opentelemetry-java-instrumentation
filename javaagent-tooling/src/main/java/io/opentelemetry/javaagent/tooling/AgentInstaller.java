@@ -5,35 +5,34 @@
 
 package io.opentelemetry.javaagent.tooling;
 
-import static io.opentelemetry.javaagent.tooling.bytebuddy.matcher.NameMatchers.namedOneOf;
-import static io.opentelemetry.javaagent.tooling.matcher.GlobalIgnoresMatcher.globalIgnoresMatcher;
+import static io.opentelemetry.javaagent.bootstrap.AgentInitializer.isJavaBefore9;
+import static io.opentelemetry.javaagent.tooling.SafeServiceLoader.loadOrdered;
+import static io.opentelemetry.javaagent.tooling.Utils.getResourceName;
 import static net.bytebuddy.matcher.ElementMatchers.any;
-import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
-import static net.bytebuddy.matcher.ElementMatchers.none;
 
 import io.opentelemetry.instrumentation.api.config.Config;
 import io.opentelemetry.javaagent.bootstrap.AgentClassLoader;
-import io.opentelemetry.javaagent.bootstrap.AgentInitializer;
-import io.opentelemetry.javaagent.instrumentation.api.SafeServiceLoader;
+import io.opentelemetry.javaagent.extension.AgentExtension;
+import io.opentelemetry.javaagent.extension.AgentListener;
+import io.opentelemetry.javaagent.extension.ignore.IgnoredTypesConfigurer;
+import io.opentelemetry.javaagent.extension.instrumentation.InstrumentationModule;
 import io.opentelemetry.javaagent.instrumentation.api.internal.BootstrapPackagePrefixesHolder;
+import io.opentelemetry.javaagent.instrumentation.api.internal.InstrumentedTaskClasses;
 import io.opentelemetry.javaagent.spi.BootstrapPackagesProvider;
-import io.opentelemetry.javaagent.spi.ByteBuddyAgentCustomizer;
-import io.opentelemetry.javaagent.spi.ComponentInstaller;
-import io.opentelemetry.javaagent.spi.IgnoreMatcherProvider;
 import io.opentelemetry.javaagent.tooling.config.ConfigInitializer;
 import io.opentelemetry.javaagent.tooling.context.FieldBackedProvider;
-import io.opentelemetry.javaagent.tooling.matcher.GlobalClassloaderIgnoresMatcher;
+import io.opentelemetry.javaagent.tooling.ignore.IgnoredClassLoadersMatcher;
+import io.opentelemetry.javaagent.tooling.ignore.IgnoredTypesBuilderImpl;
+import io.opentelemetry.javaagent.tooling.ignore.IgnoredTypesMatcher;
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.ServiceLoader;
-import java.util.stream.Collectors;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import net.bytebuddy.agent.builder.AgentBuilder;
@@ -41,7 +40,6 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.description.type.TypeDefinition;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.DynamicType;
-import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.utility.JavaModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,19 +49,19 @@ public class AgentInstaller {
   private static final Logger log;
 
   private static final String JAVAAGENT_ENABLED_CONFIG = "otel.javaagent.enabled";
-  private static final String EXCLUDED_CLASSES_CONFIG = "otel.javaagent.exclude-classes";
 
-  // We set this system property when running the agent with unit tests to allow verifying that we
-  // don't ignore libraries that we actually attempt to instrument. It means either the list is
-  // wrong or a type matcher is.
-  private static final String ADDITIONAL_LIBRARY_IGNORES_ENABLED =
-      "otel.javaagent.testing.additional-library-ignores.enabled";
+  // This property may be set to force synchronous AgentListener#afterAgent() execution: the
+  // condition for delaying the AgentListener initialization is pretty broad and in case it covers
+  // too much javaagent users can file a bug, force sync execution by setting this property to true
+  // and continue using the javaagent
+  private static final String FORCE_SYNCHRONOUS_AGENT_LISTENERS_CONFIG =
+      "otel.javaagent.experimental.force-synchronous-agent-listeners";
 
   private static final Map<String, List<Runnable>> CLASS_LOAD_CALLBACKS = new HashMap<>();
-  private static volatile Instrumentation INSTRUMENTATION;
+  private static volatile Instrumentation instrumentation;
 
   public static Instrumentation getInstrumentation() {
-    return INSTRUMENTATION;
+    return instrumentation;
   }
 
   static {
@@ -72,19 +70,32 @@ public class AgentInstaller {
 
     addByteBuddyRawSetting();
     BootstrapPackagePrefixesHolder.setBoostrapPackagePrefixes(loadBootstrapPackagePrefixes());
-    // WeakMap is used by other classes below, so we need to register the provider first.
-    AgentTooling.registerWeakMapProvider();
-    // Instrumentation can use a bounded cache, so register here.
-    AgentTooling.registerBoundedCacheProvider();
     // this needs to be done as early as possible - before the first Config.get() call
     ConfigInitializer.initialize();
+    // ensure java.lang.reflect.Proxy is loaded, as transformation code uses it internally
+    // loading java.lang.reflect.Proxy after the bytebuddy transformer is set up causes
+    // the internal-proxy instrumentation module to transform it, and then the bytebuddy
+    // transformation code also tries to load it, which leads to a ClassCircularityError
+    // loading java.lang.reflect.Proxy early here still allows it to be retransformed by the
+    // internal-proxy instrumentation module after the bytebuddy transformer is set up
+    Proxy.class.getName();
+
+    // caffeine can trigger first access of ForkJoinPool under transform(), which leads ForkJoinPool
+    // not to get transformed itself.
+    // loading it early here still allows it to be retransformed as part of agent installation below
+    ForkJoinPool.class.getName();
+
+    // caffeine uses AtomicReferenceArray, ensure it is loaded to avoid ClassCircularityError during
+    // transform.
+    AtomicReferenceArray.class.getName();
   }
 
   public static void installBytebuddyAgent(Instrumentation inst) {
     logVersionInfo();
-    if (Config.get().getBooleanProperty(JAVAAGENT_ENABLED_CONFIG, true)) {
-      Iterable<ComponentInstaller> componentInstallers = loadComponentProviders();
-      installBytebuddyAgent(inst, componentInstallers);
+    Config config = Config.get();
+    if (config.getBooleanProperty(JAVAAGENT_ENABLED_CONFIG, true)) {
+      List<AgentListener> agentListeners = loadOrdered(AgentListener.class);
+      installBytebuddyAgent(inst, agentListeners);
     } else {
       log.debug("Tracing is disabled, not installing instrumentations.");
     }
@@ -98,19 +109,16 @@ public class AgentInstaller {
    * @return the agent's class transformer
    */
   public static ResettableClassFileTransformer installBytebuddyAgent(
-      Instrumentation inst, Iterable<ComponentInstaller> componentInstallers) {
+      Instrumentation inst, Iterable<AgentListener> agentListeners) {
 
-    installComponentsBeforeByteBuddy(componentInstallers);
+    Config config = Config.get();
+    runBeforeAgentListeners(agentListeners, config);
 
-    INSTRUMENTATION = inst;
+    instrumentation = inst;
 
     FieldBackedProvider.resetContextMatchers();
 
-    IgnoreMatcherProvider ignoreMatcherProvider = loadIgnoreMatcherProvider();
-    log.debug(
-        "Ignore matcher provider {} will be used", ignoreMatcherProvider.getClass().getName());
-
-    AgentBuilder.Ignored ignoredAgentBuilder =
+    AgentBuilder agentBuilder =
         new AgentBuilder.Default()
             .disableClassFormatChanges()
             .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
@@ -118,21 +126,13 @@ public class AgentInstaller {
             .with(AgentBuilder.DescriptionStrategy.Default.POOL_ONLY)
             .with(AgentTooling.poolStrategy())
             .with(new ClassLoadListener())
-            .with(AgentTooling.locationStrategy())
-            // FIXME: we cannot enable it yet due to BB/JVM bug, see
-            // https://github.com/raphw/byte-buddy/issues/558
-            // .with(AgentBuilder.LambdaInstrumentationStrategy.ENABLED)
-            .ignore(any(), GlobalClassloaderIgnoresMatcher.skipClassLoader(ignoreMatcherProvider));
+            .with(AgentTooling.locationStrategy());
+    // FIXME: we cannot enable it yet due to BB/JVM bug, see
+    // https://github.com/raphw/byte-buddy/issues/558
+    // .with(AgentBuilder.LambdaInstrumentationStrategy.ENABLED)
 
-    ignoredAgentBuilder =
-        ignoredAgentBuilder.or(
-            globalIgnoresMatcher(
-                Config.get().getBooleanProperty(ADDITIONAL_LIBRARY_IGNORES_ENABLED, true),
-                ignoreMatcherProvider));
+    agentBuilder = configureIgnoredTypes(config, agentBuilder);
 
-    ignoredAgentBuilder = ignoredAgentBuilder.or(matchesConfiguredExcludes());
-
-    AgentBuilder agentBuilder = ignoredAgentBuilder;
     if (log.isDebugEnabled()) {
       agentBuilder =
           agentBuilder
@@ -142,103 +142,81 @@ public class AgentInstaller {
               .with(new TransformLoggingListener());
     }
 
-    int numInstrumenters = 0;
-
-    for (InstrumentationModule instrumentationModule : loadInstrumentationModules()) {
-      log.debug("Loading instrumentation {}", instrumentationModule.getClass().getName());
+    int numberOfLoadedExtensions = 0;
+    for (AgentExtension agentExtension : loadOrdered(AgentExtension.class)) {
+      log.debug(
+          "Loading extension {} [class {}]",
+          agentExtension.extensionName(),
+          agentExtension.getClass().getName());
       try {
-        agentBuilder = instrumentationModule.instrument(agentBuilder);
-        numInstrumenters++;
+        agentBuilder = agentExtension.extend(agentBuilder);
+        numberOfLoadedExtensions++;
       } catch (Exception | LinkageError e) {
         log.error(
-            "Unable to load instrumentation {}", instrumentationModule.getClass().getName(), e);
+            "Unable to load extension {} [class {}]",
+            agentExtension.extensionName(),
+            agentExtension.getClass().getName(),
+            e);
       }
     }
+    log.debug("Installed {} extension(s)", numberOfLoadedExtensions);
 
-    agentBuilder = customizeByteBuddyAgent(agentBuilder);
-    log.debug("Installed {} instrumenter(s)", numInstrumenters);
     ResettableClassFileTransformer resettableClassFileTransformer = agentBuilder.installOn(inst);
-    installComponentsAfterByteBuddy(componentInstallers);
+    runAfterAgentListeners(agentListeners, config);
     return resettableClassFileTransformer;
   }
 
-  private static void installComponentsBeforeByteBuddy(
-      Iterable<ComponentInstaller> componentInstallers) {
-    Thread.currentThread().setContextClassLoader(AgentInstaller.class.getClassLoader());
-    for (ComponentInstaller componentInstaller : componentInstallers) {
-      componentInstaller.beforeByteBuddyAgent();
+  private static void runBeforeAgentListeners(
+      Iterable<AgentListener> agentListeners, Config config) {
+    for (AgentListener agentListener : agentListeners) {
+      agentListener.beforeAgent(config);
     }
   }
 
-  private static void installComponentsAfterByteBuddy(
-      Iterable<ComponentInstaller> componentInstallers) {
-    /*
-     * java.util.logging.LogManager maintains a final static LogManager, which is created during class initialization.
-     *
-     * JMXFetch uses jre bootstrap classes which touch this class. This means applications which require a custom log
-     * manager may not have a chance to set the global log manager if jmxfetch runs first. JMXFetch will incorrectly
-     * set the global log manager in cases where the app sets the log manager system property or when the log manager
-     * class is not on the system classpath.
-     *
-     * Our solution is to delay the initialization of jmxfetch when we detect a custom log manager being used.
-     *
-     * Once we see the LogManager class loading, it's safe to start jmxfetch because the application is already setting
-     * the global log manager and jmxfetch won't be able to touch it due to classloader locking.
-     */
+  private static AgentBuilder configureIgnoredTypes(Config config, AgentBuilder agentBuilder) {
+    IgnoredTypesBuilderImpl builder = new IgnoredTypesBuilderImpl();
+    for (IgnoredTypesConfigurer configurer : loadOrdered(IgnoredTypesConfigurer.class)) {
+      configurer.configure(config, builder);
+    }
 
-    /*
-     * Similar thing happens with AgentTracer on (at least) zulu-8 because it uses OkHttp which indirectly loads JFR
-     * events which in turn loads LogManager. This is not a problem on newer JDKs because there JFR uses different
-     * logging facility.
-     */
-    boolean appUsingCustomLogManager = isAppUsingCustomLogManager();
-    if (isJavaBefore9WithJfr() && appUsingCustomLogManager) {
-      log.debug("Custom logger detected. Delaying Agent Tracer initialization.");
+    InstrumentedTaskClasses.setIgnoredTaskClasses(builder.buildIgnoredTasksTrie());
+
+    return agentBuilder
+        .ignore(any(), new IgnoredClassLoadersMatcher(builder.buildIgnoredClassLoadersTrie()))
+        .or(new IgnoredTypesMatcher(builder.buildIgnoredTypesTrie()));
+  }
+
+  private static void runAfterAgentListeners(
+      Iterable<AgentListener> agentListeners, Config config) {
+    // java.util.logging.LogManager maintains a final static LogManager, which is created during
+    // class initialization. Some AgentListener implementations may use JRE bootstrap classes
+    // which touch this class (e.g. JFR classes or some MBeans).
+    // It is worth noting that starting from Java 9 (JEP 264) Java platform classes no longer use
+    // JUL directly, but instead they use a new System.Logger interface, so the LogManager issue
+    // applies mainly to Java 8.
+    // This means applications which require a custom LogManager may not have a chance to set the
+    // global LogManager if one of those AgentListeners runs first: it will incorrectly
+    // set the global LogManager to the default JVM one in cases where the instrumented application
+    // sets the LogManager system property or when the custom LogManager class is not on the system
+    // classpath.
+    // Our solution is to delay the initialization of AgentListeners when we detect a custom
+    // log manager being used.
+    // Once we see the LogManager class loading, it's safe to run AgentListener#afterAgent() because
+    // the application is already setting the global LogManager and AgentListener won't be able
+    // to touch it due to classloader locking.
+    boolean shouldForceSynchronousAgentListenersCalls =
+        Config.get().getBooleanProperty(FORCE_SYNCHRONOUS_AGENT_LISTENERS_CONFIG, false);
+    if (!shouldForceSynchronousAgentListenersCalls
+        && isJavaBefore9()
+        && isAppUsingCustomLogManager()) {
+      log.debug("Custom JUL LogManager detected: delaying AgentListener#afterAgent() calls");
       registerClassLoadCallback(
-          "java.util.logging.LogManager",
-          new InstallComponentAfterByteBuddyCallback(componentInstallers));
+          "java.util.logging.LogManager", new DelayedAfterAgentCallback(config, agentListeners));
     } else {
-      for (ComponentInstaller componentInstaller : componentInstallers) {
-        componentInstaller.afterByteBuddyAgent();
+      for (AgentListener agentListener : agentListeners) {
+        agentListener.afterAgent(config);
       }
     }
-  }
-
-  private static AgentBuilder customizeByteBuddyAgent(AgentBuilder agentBuilder) {
-    Iterable<ByteBuddyAgentCustomizer> agentCustomizers = loadByteBuddyAgentCustomizers();
-    for (ByteBuddyAgentCustomizer agentCustomizer : agentCustomizers) {
-      log.debug("Applying agent builder customizer {}", agentCustomizer.getClass().getName());
-      agentBuilder = agentCustomizer.customize(agentBuilder);
-    }
-    return agentBuilder;
-  }
-
-  private static Iterable<ComponentInstaller> loadComponentProviders() {
-    return ServiceLoader.load(ComponentInstaller.class, AgentInstaller.class.getClassLoader());
-  }
-
-  private static IgnoreMatcherProvider loadIgnoreMatcherProvider() {
-    ServiceLoader<IgnoreMatcherProvider> ignoreMatcherProviders =
-        ServiceLoader.load(IgnoreMatcherProvider.class, AgentInstaller.class.getClassLoader());
-
-    Iterator<IgnoreMatcherProvider> iterator = ignoreMatcherProviders.iterator();
-    if (iterator.hasNext()) {
-      return iterator.next();
-    }
-    return new NoopIgnoreMatcherProvider();
-  }
-
-  private static Iterable<ByteBuddyAgentCustomizer> loadByteBuddyAgentCustomizers() {
-    return ServiceLoader.load(
-        ByteBuddyAgentCustomizer.class, AgentInstaller.class.getClassLoader());
-  }
-
-  private static List<InstrumentationModule> loadInstrumentationModules() {
-    return SafeServiceLoader.load(
-            InstrumentationModule.class, AgentInstaller.class.getClassLoader())
-        .stream()
-        .sorted(Comparator.comparingInt(InstrumentationModule::getOrder))
-        .collect(Collectors.toList());
   }
 
   private static void addByteBuddyRawSetting() {
@@ -258,38 +236,10 @@ public class AgentInstaller {
     }
   }
 
-  private static ElementMatcher.Junction<Object> matchesConfiguredExcludes() {
-    List<String> excludedClasses = Config.get().getListProperty(EXCLUDED_CLASSES_CONFIG);
-    ElementMatcher.Junction matcher = none();
-    List<String> literals = new ArrayList<>();
-    List<String> prefixes = new ArrayList<>();
-    // first accumulate by operation because a lot of work can be aggregated
-    for (String excludedClass : excludedClasses) {
-      excludedClass = excludedClass.trim();
-      if (excludedClass.endsWith("*")) {
-        // remove the trailing *
-        prefixes.add(excludedClass.substring(0, excludedClass.length() - 1));
-      } else {
-        literals.add(excludedClass);
-      }
-    }
-    if (!literals.isEmpty()) {
-      matcher = matcher.or(namedOneOf(literals));
-    }
-    for (String prefix : prefixes) {
-      // TODO - with a prefix tree this matching logic can be handled by a
-      // single longest common prefix query
-      matcher = matcher.or(nameStartsWith(prefix));
-    }
-    return matcher;
-  }
-
   private static List<String> loadBootstrapPackagePrefixes() {
-    List<String> bootstrapPackages =
-        new ArrayList<>(Arrays.asList(Constants.BOOTSTRAP_PACKAGE_PREFIXES));
+    List<String> bootstrapPackages = new ArrayList<>(Constants.BOOTSTRAP_PACKAGE_PREFIXES);
     Iterable<BootstrapPackagesProvider> bootstrapPackagesProviders =
-        SafeServiceLoader.load(
-            BootstrapPackagesProvider.class, AgentInstaller.class.getClassLoader());
+        SafeServiceLoader.load(BootstrapPackagesProvider.class);
     for (BootstrapPackagesProvider provider : bootstrapPackagesProviders) {
       List<String> packagePrefixes = provider.getPackagePrefixes();
       log.debug(
@@ -312,8 +262,7 @@ public class AgentInstaller {
     public Iterable<? extends List<Class<?>>> onError(
         int index, List<Class<?>> batch, Throwable throwable, List<Class<?>> types) {
       if (log.isDebugEnabled()) {
-        log.debug(
-            "Exception while retransforming " + batch.size() + " classes: " + batch, throwable);
+        log.debug("Exception while retransforming {} classes: {}", batch.size(), batch, throwable);
       }
       return Collections.emptyList();
     }
@@ -337,10 +286,10 @@ public class AgentInstaller {
         Throwable throwable) {
       if (log.isDebugEnabled()) {
         log.debug(
-            "Failed to handle {} for transformation on classloader {}: {}",
+            "Failed to handle {} for transformation on classloader {}",
             typeName,
             classLoader,
-            throwable.getMessage());
+            throwable);
       }
     }
 
@@ -391,29 +340,14 @@ public class AgentInstaller {
     }
   }
 
-  protected static class InstallComponentAfterByteBuddyCallback extends ClassLoadCallBack {
+  private static class DelayedAfterAgentCallback implements Runnable {
+    private final Iterable<AgentListener> agentListeners;
+    private final Config config;
 
-    private final Iterable<ComponentInstaller> componentInstallers;
-
-    protected InstallComponentAfterByteBuddyCallback(
-        Iterable<ComponentInstaller> componentInstallers) {
-      this.componentInstallers = componentInstallers;
+    private DelayedAfterAgentCallback(Config config, Iterable<AgentListener> agentListeners) {
+      this.agentListeners = agentListeners;
+      this.config = config;
     }
-
-    @Override
-    public String getName() {
-      return componentInstallers.getClass().getName();
-    }
-
-    @Override
-    public void execute() {
-      for (ComponentInstaller componentInstaller : componentInstallers) {
-        componentInstaller.afterByteBuddyAgent();
-      }
-    }
-  }
-
-  protected abstract static class ClassLoadCallBack implements Runnable {
 
     @Override
     public void run() {
@@ -422,26 +356,21 @@ public class AgentInstaller {
        * to load classes being transformed. To avoid this we start a thread here that calls the callback.
        * This seems to resolve this problem.
        */
-      Thread thread =
-          new Thread(
-              new Runnable() {
-                @Override
-                public void run() {
-                  try {
-                    execute();
-                  } catch (Exception e) {
-                    log.error("Failed to run class loader callback {}", getName(), e);
-                  }
-                }
-              });
-      thread.setName("agent-startup-" + getName());
+      Thread thread = new Thread(this::runAgentListeners);
+      thread.setName("delayed-agent-listeners");
       thread.setDaemon(true);
       thread.start();
     }
 
-    public abstract String getName();
-
-    public abstract void execute();
+    private void runAgentListeners() {
+      for (AgentListener agentListener : agentListeners) {
+        try {
+          agentListener.afterAgent(config);
+        } catch (RuntimeException e) {
+          log.error("Failed to execute {}", agentListener.getClass().getName(), e);
+        }
+      }
+    }
   }
 
   private static class ClassLoadListener implements AgentBuilder.Listener {
@@ -490,10 +419,13 @@ public class AgentInstaller {
     @Override
     public Iterable<Iterable<Class<?>>> resolve(Instrumentation instrumentation) {
       // filter out our agent classes and injected helper classes
-      return () -> streamOf(delegate.resolve(instrumentation)).map(this::filterClasses).iterator();
+      return () ->
+          streamOf(delegate.resolve(instrumentation))
+              .map(RedefinitionDiscoveryStrategy::filterClasses)
+              .iterator();
     }
 
-    private Iterable<Class<?>> filterClasses(Iterable<Class<?>> classes) {
+    private static Iterable<Class<?>> filterClasses(Iterable<Class<?>> classes) {
       return () -> streamOf(classes).filter(c -> !isIgnored(c)).iterator();
     }
 
@@ -503,7 +435,11 @@ public class AgentInstaller {
 
     private static boolean isIgnored(Class<?> c) {
       ClassLoader cl = c.getClassLoader();
-      if (cl != null && cl.getClass() == AgentClassLoader.class) {
+      if (cl instanceof AgentClassLoader || cl instanceof ExtensionClassLoader) {
+        return true;
+      }
+      // ignore generate byte buddy helper class
+      if (c.getName().startsWith("java.lang.ClassLoader$ByteBuddyAccessor$")) {
         return true;
       }
 
@@ -511,79 +447,45 @@ public class AgentInstaller {
     }
   }
 
-  /**
-   * Search for java or agent-tracer sysprops which indicate that a custom log manager will be used.
-   * Also search for any app classes known to set a custom log manager.
-   *
-   * @return true if we detect a custom log manager being used.
-   */
+  /** Detect if the instrumented application is using a custom JUL LogManager. */
   private static boolean isAppUsingCustomLogManager() {
-    String tracerCustomLogManSysprop = "otel.app.customlogmanager";
-    String customLogManagerProp = System.getProperty(tracerCustomLogManSysprop);
-    String customLogManagerEnv =
-        System.getenv(tracerCustomLogManSysprop.replace('.', '_').toUpperCase());
-
-    if (customLogManagerProp != null || customLogManagerEnv != null) {
-      log.debug("Prop - customlogmanager: " + customLogManagerProp);
-      log.debug("Env - customlogmanager: " + customLogManagerEnv);
-      // Allow setting to skip these automatic checks:
-      return Boolean.parseBoolean(customLogManagerProp)
-          || Boolean.parseBoolean(customLogManagerEnv);
-    }
-
     String jbossHome = System.getenv("JBOSS_HOME");
     if (jbossHome != null) {
-      log.debug("Env - jboss: " + jbossHome);
+      log.debug("Found JBoss: {}; assuming app is using custom LogManager", jbossHome);
       // JBoss/Wildfly is known to set a custom log manager after startup.
       // Originally we were checking for the presence of a jboss class,
       // but it seems some non-jboss applications have jboss classes on the classpath.
-      // This would cause jmxfetch initialization to be delayed indefinitely.
+      // This would cause AgentListener#afterAgent() calls to be delayed indefinitely.
       // Checking for an environment variable required by jboss instead.
       return true;
     }
 
-    String logManagerProp = System.getProperty("java.util.logging.manager");
-    if (logManagerProp != null) {
+    String customLogManager = System.getProperty("java.util.logging.manager");
+    if (customLogManager != null) {
+      log.debug(
+          "Detected custom LogManager configuration: java.util.logging.manager={}",
+          customLogManager);
       boolean onSysClasspath =
-          ClassLoader.getSystemResource(logManagerProp.replaceAll("\\.", "/") + ".class") != null;
-      log.debug("Prop - logging.manager: " + logManagerProp);
-      log.debug("logging.manager on system classpath: " + onSysClasspath);
+          ClassLoader.getSystemResource(getResourceName(customLogManager)) != null;
+      log.debug(
+          "Class {} is on system classpath: {}delaying AgentInstaller#afterAgent()",
+          customLogManager,
+          onSysClasspath ? "not " : "");
       // Some applications set java.util.logging.manager but never actually initialize the logger.
       // Check to see if the configured manager is on the system classpath.
-      // If so, it should be safe to initialize jmxfetch which will setup the log manager.
+      // If so, it should be safe to initialize AgentInstaller which will setup the log manager:
+      // LogManager tries to load the implementation first using system CL, then falls back to
+      // current context CL
       return !onSysClasspath;
     }
 
     return false;
   }
 
-  private static boolean isJavaBefore9WithJfr() {
-    if (!AgentInitializer.isJavaBefore9()) {
-      return false;
-    }
-    // FIXME: this is quite a hack because there maybe jfr classes on classpath somehow that have
-    // nothing to do with JDK but this should be safe because only thing this does is to delay
-    // tracer install
-    String jfrClassResourceName = "jdk.jfr.Recording".replace('.', '/') + ".class";
-    return Thread.currentThread().getContextClassLoader().getResource(jfrClassResourceName) != null;
-  }
-
   private static void logVersionInfo() {
     VersionLogger.logAllVersions();
     log.debug(
-        AgentInstaller.class.getName() + " loaded on " + AgentInstaller.class.getClassLoader());
-  }
-
-  private static class NoopIgnoreMatcherProvider implements IgnoreMatcherProvider {
-    @Override
-    public Result classloader(ClassLoader classLoader) {
-      return Result.DEFAULT;
-    }
-
-    @Override
-    public Result type(TypeDescription target) {
-      return Result.DEFAULT;
-    }
+        "{} loaded on {}", AgentInstaller.class.getName(), AgentInstaller.class.getClassLoader());
   }
 
   private AgentInstaller() {}

@@ -27,10 +27,12 @@ import org.jboss.resteasy.core.interception.jaxrs.PostMatchContainerRequestConte
 public class Resteasy31RequestContextInstrumentation extends AbstractRequestContextInstrumentation {
   @Override
   protected String abortAdviceName() {
-    return ContainerRequestContextAdvice.class.getName();
+    return getClass().getName() + "$ContainerRequestContextAdvice";
   }
 
+  @SuppressWarnings("unused")
   public static class ContainerRequestContextAdvice {
+
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void decorateAbortSpan(
         @Advice.This ContainerRequestContext requestContext,

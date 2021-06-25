@@ -7,7 +7,7 @@ package io.opentelemetry.instrumentation.spring.autoconfigure.exporters.zipkin;
 
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter;
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporterBuilder;
-import io.opentelemetry.instrumentation.spring.autoconfigure.TracerAutoConfiguration;
+import io.opentelemetry.instrumentation.spring.autoconfigure.OpenTelemetryAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -22,23 +22,19 @@ import org.springframework.context.annotation.Configuration;
  * <p>Initializes {@link ZipkinSpanExporter} bean if bean is missing.
  */
 @Configuration
-@AutoConfigureBefore(TracerAutoConfiguration.class)
+@AutoConfigureBefore(OpenTelemetryAutoConfiguration.class)
 @EnableConfigurationProperties(ZipkinSpanExporterProperties.class)
-@ConditionalOnProperty(
-    prefix = "opentelemetry.trace.exporter.zipkin",
-    name = "enabled",
-    matchIfMissing = true)
+@ConditionalOnProperty(prefix = "otel.exporter.zipkin", name = "enabled", matchIfMissing = true)
 @ConditionalOnClass(ZipkinSpanExporter.class)
 public class ZipkinSpanExporterAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public ZipkinSpanExporter otelZipkinSpanExporter(
-      ZipkinSpanExporterProperties zipkinSpanExporterProperties) {
+  public ZipkinSpanExporter otelZipkinSpanExporter(ZipkinSpanExporterProperties properties) {
 
     ZipkinSpanExporterBuilder builder = ZipkinSpanExporter.builder();
-    if (zipkinSpanExporterProperties.getEndpoint() != null) {
-      builder.setEndpoint(zipkinSpanExporterProperties.getEndpoint());
+    if (properties.getEndpoint() != null) {
+      builder.setEndpoint(properties.getEndpoint());
     }
     return builder.build();
   }

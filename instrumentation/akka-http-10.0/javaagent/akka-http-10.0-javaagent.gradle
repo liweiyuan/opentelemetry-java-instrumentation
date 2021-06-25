@@ -1,11 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
-apply from: "$rootDir/gradle/test-with-scala.gradle"
-apply plugin: 'org.unbroken-dome.test-sets'
-
-testSets {
-  version101Test {
-    dirName = 'test'
-  }
+plugins {
+  id("otel.javaagent-instrumentation")
+  id("otel.scala-conventions")
 }
 
 muzzle {
@@ -48,17 +43,11 @@ muzzle {
 }
 
 dependencies {
-  library group: 'com.typesafe.akka', name: 'akka-http_2.11', version: '10.0.0'
-  library group: 'com.typesafe.akka', name: 'akka-stream_2.11', version: '2.4.14'
+  library "com.typesafe.akka:akka-http_2.11:10.0.0"
+  library "com.typesafe.akka:akka-stream_2.11:2.4.14"
 
-  // There are some internal API changes in 10.1 that we would like to test separately for
-  version101TestImplementation group: 'com.typesafe.akka', name: 'akka-http_2.11', version: '10.1.0'
-  version101TestImplementation group: 'com.typesafe.akka', name: 'akka-stream_2.11', version: '2.5.11'
-}
-
-test.dependsOn version101Test
-
-compileVersion101TestGroovy {
-  classpath = classpath.plus(files(compileVersion101TestScala.destinationDir))
-  dependsOn compileVersion101TestScala
+  // these instrumentations are not needed for the tests to pass
+  // they are here to test for context leaks
+  testInstrumentation project(':instrumentation:akka-actor-2.5:javaagent')
+  testInstrumentation project(':instrumentation:akka-actor-fork-join-2.5:javaagent')
 }

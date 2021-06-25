@@ -7,9 +7,11 @@ package io.opentelemetry.javaagent.tooling;
 
 import static org.slf4j.event.Level.DEBUG;
 import static org.slf4j.event.Level.TRACE;
+import static org.slf4j.event.Level.WARN;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
@@ -22,12 +24,12 @@ import org.slf4j.event.Level;
  * <li>(Because gradle hijacks System.out), gradle is called from inside of the class file transform
  * <li>Gradle tries to grab a different lock during it's implementation of System.out
  */
-public class TransformSafeLogger {
+public final class TransformSafeLogger {
 
   private static final boolean ENABLE_TRANSFORM_SAFE_LOGGING =
       Boolean.getBoolean("otel.javaagent.testing.transform-safe-logging.enabled");
 
-  private static final BlockingQueue<LogMessage> logMessageQueue;
+  @Nullable private static final BlockingQueue<LogMessage> logMessageQueue;
 
   static {
     if (ENABLE_TRANSFORM_SAFE_LOGGING) {
@@ -100,6 +102,30 @@ public class TransformSafeLogger {
       logMessageQueue.offer(new LogMessage(TRACE, logger, format, arguments));
     } else {
       logger.trace(format, arguments);
+    }
+  }
+
+  public void warn(String format, Object arg) {
+    if (logMessageQueue != null) {
+      logMessageQueue.offer(new LogMessage(WARN, logger, format, arg));
+    } else {
+      logger.warn(format, arg);
+    }
+  }
+
+  public void warn(String format, Object arg1, Object arg2) {
+    if (logMessageQueue != null) {
+      logMessageQueue.offer(new LogMessage(WARN, logger, format, arg1, arg2));
+    } else {
+      logger.warn(format, arg1, arg2);
+    }
+  }
+
+  public void warn(String format, Object... arguments) {
+    if (logMessageQueue != null) {
+      logMessageQueue.offer(new LogMessage(WARN, logger, format, arguments));
+    } else {
+      logger.warn(format, arguments);
     }
   }
 

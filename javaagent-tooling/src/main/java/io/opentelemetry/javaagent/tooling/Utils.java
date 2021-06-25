@@ -9,18 +9,22 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 
 import io.opentelemetry.javaagent.bootstrap.AgentClassLoader;
 import io.opentelemetry.javaagent.bootstrap.AgentClassLoader.BootstrapClassLoaderProxy;
-import java.net.URL;
+import io.opentelemetry.javaagent.bootstrap.AgentInitializer;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDefinition;
 
 public class Utils {
 
   private static final BootstrapClassLoaderProxy unitTestBootstrapProxy =
-      new BootstrapClassLoaderProxy(new URL[0]);
+      new BootstrapClassLoaderProxy(null);
 
   /** Return the classloader the core agent is running on. */
   public static ClassLoader getAgentClassLoader() {
     return AgentInstaller.class.getClassLoader();
+  }
+
+  public static ClassLoader getExtensionsClassLoader() {
+    return AgentInitializer.getAgentClassLoader();
   }
 
   /** Return a classloader which can be used to look up bootstrap resources. */
@@ -69,18 +73,6 @@ public class Utils {
    */
   public static MethodDescription getMethodDefinition(TypeDefinition type, String methodName) {
     return type.getDeclaredMethods().filter(named(methodName)).getOnly();
-  }
-
-  /** Returns the current stack trace with multiple entries on new lines. */
-  public static String getStackTraceAsString() {
-    StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-    StringBuilder stringBuilder = new StringBuilder();
-    String lineSeparator = System.getProperty("line.separator");
-    for (StackTraceElement element : stackTrace) {
-      stringBuilder.append(element.toString());
-      stringBuilder.append(lineSeparator);
-    }
-    return stringBuilder.toString();
   }
 
   private Utils() {}

@@ -1,5 +1,8 @@
 plugins {
   id "org.gradle.playframework" version "0.9"
+  id("com.github.johnrengelman.shadow")
+
+  id("otel.java-conventions")
 }
 
 afterEvaluate {
@@ -34,7 +37,6 @@ dependencies {
 repositories {
   mavenLocal()
   mavenCentral()
-  jcenter()
   maven {
     name "lightbend-maven-releases"
     url "https://repo.lightbend.com/lightbend/maven-release"

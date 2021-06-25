@@ -8,7 +8,7 @@ package io.opentelemetry.instrumentation.spring.autoconfigure.webmvc;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.instrumentation.spring.autoconfigure.TracerAutoConfiguration;
+import io.opentelemetry.instrumentation.spring.autoconfigure.OpenTelemetryAutoConfiguration;
 import io.opentelemetry.instrumentation.spring.webmvc.WebMvcTracingFilter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +22,7 @@ class WebMvcFilterAutoConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(
               AutoConfigurations.of(
-                  TracerAutoConfiguration.class, WebMvcFilterAutoConfiguration.class));
+                  OpenTelemetryAutoConfiguration.class, WebMvcFilterAutoConfiguration.class));
 
   @AfterEach
   void tearDown() {
@@ -33,32 +33,27 @@ class WebMvcFilterAutoConfigurationTest {
   @DisplayName("when web is ENABLED should initialize WebMvcTracingFilter bean")
   void webEnabled() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.web.enabled=true")
+        .withPropertyValues("otel.springboot.web.enabled=true")
         .run(
-            (context) -> {
-              assertThat(context.getBean("otelWebMvcTracingFilter", WebMvcTracingFilter.class))
-                  .isNotNull();
-            });
+            context ->
+                assertThat(context.getBean("otelWebMvcTracingFilter", WebMvcTracingFilter.class))
+                    .isNotNull());
   }
 
   @Test
   @DisplayName("when web is DISABLED should NOT initialize WebMvcTracingFilter bean")
   void disabledProperty() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.web.enabled=false")
-        .run(
-            (context) -> {
-              assertThat(context.containsBean("otelWebMvcTracingFilter")).isFalse();
-            });
+        .withPropertyValues("otel.springboot.web.enabled=false")
+        .run(context -> assertThat(context.containsBean("otelWebMvcTracingFilter")).isFalse());
   }
 
   @Test
   @DisplayName("when web property is MISSING should initialize WebMvcTracingFilter bean")
   void noProperty() {
     this.contextRunner.run(
-        (context) -> {
-          assertThat(context.getBean("otelWebMvcTracingFilter", WebMvcTracingFilter.class))
-              .isNotNull();
-        });
+        context ->
+            assertThat(context.getBean("otelWebMvcTracingFilter", WebMvcTracingFilter.class))
+                .isNotNull());
   }
 }

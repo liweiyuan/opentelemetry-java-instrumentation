@@ -4,12 +4,15 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.INTERNAL
+import static io.opentelemetry.api.trace.SpanKind.SERVER
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderServerTrace
 
 import io.dropwizard.testing.junit.ResourceTestRule
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
+import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
 import org.junit.ClassRule
 import spock.lang.Shared
+import spock.lang.Unroll
 
 class JerseyTest extends AgentInstrumentationSpecification {
 
@@ -21,6 +24,7 @@ class JerseyTest extends AgentInstrumentationSpecification {
     .addResource(new Resource.Test3())
     .build()
 
+  @Unroll
   def "test #resource"() {
     when:
     // start a trace because the test doesn't go through any servlet or other instrumentation.
@@ -35,6 +39,7 @@ class JerseyTest extends AgentInstrumentationSpecification {
       trace(0, 2) {
         span(0) {
           name expectedSpanName
+          kind SERVER
           attributes {
           }
         }
@@ -43,6 +48,8 @@ class JerseyTest extends AgentInstrumentationSpecification {
           childOf span(0)
           name controllerName
           attributes {
+            "${SemanticAttributes.CODE_NAMESPACE.key}" ~/Resource[$]Test*/
+            "${SemanticAttributes.CODE_FUNCTION.key}" "hello"
           }
         }
       }
@@ -70,6 +77,7 @@ class JerseyTest extends AgentInstrumentationSpecification {
       trace(0, 2) {
         span(0) {
           name expectedSpanName
+          kind SERVER
           attributes {
           }
         }
@@ -78,6 +86,8 @@ class JerseyTest extends AgentInstrumentationSpecification {
           name controller1Name
           kind INTERNAL
           attributes {
+            "${SemanticAttributes.CODE_NAMESPACE.key}" ~/Resource[$]Test*/
+            "${SemanticAttributes.CODE_FUNCTION.key}" "nested"
           }
         }
       }

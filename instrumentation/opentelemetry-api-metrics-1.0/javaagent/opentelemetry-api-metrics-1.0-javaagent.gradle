@@ -1,4 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
+plugins {
+  id("otel.javaagent-instrumentation")
+}
 
 dependencies {
   // this instrumentation needs to be able to reference both the OpenTelemetry API
@@ -20,8 +22,8 @@ dependencies {
   // and in the code "io.opentelemetry.*" refers to the (shaded) OpenTelemetry API that is used by
   // the agent (as those references will later be shaded)
   compileOnly project(path: ':opentelemetry-api-shaded-for-instrumenting', configuration: 'shadow')
-  compileOnly deps.opentelemetryApiMetrics
+  compileOnly "io.opentelemetry:opentelemetry-api-metrics"
 
-  testImplementation deps.guava
-  testImplementation deps.opentelemetrySdkMetrics
+  testImplementation "com.google.guava:guava"
+  testImplementation "io.opentelemetry:opentelemetry-sdk-metrics"
 }

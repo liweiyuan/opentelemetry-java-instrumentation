@@ -13,6 +13,7 @@ import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEn
 import static org.junit.Assume.assumeTrue
 
 import io.opentelemetry.instrumentation.test.asserts.TraceAssert
+import io.opentelemetry.testing.internal.armeria.common.AggregatedHttpResponse
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -52,14 +53,6 @@ abstract class TomcatServlet3Test extends AbstractServlet3Test<Tomcat, Context> 
         break
     }
     super.responseSpan(trace, index, parent, method, endpoint)
-  }
-
-  @Override
-  String expectedServerSpanName(ServerEndpoint endpoint) {
-    if (endpoint == NOT_FOUND) {
-      return getContextPath() + "/*"
-    }
-    return super.expectedServerSpanName(endpoint)
   }
 
   @Shared
@@ -125,17 +118,17 @@ abstract class TomcatServlet3Test extends AbstractServlet3Test<Tomcat, Context> 
 
   def "access log has ids for #count requests"() {
     given:
-    def request = request(SUCCESS, method, body).build()
+    def request = request(SUCCESS, method)
 
     when:
-    List<okhttp3.Response> responses = (1..count).collect {
-      return client.newCall(request).execute()
+    List<AggregatedHttpResponse> responses = (1..count).collect {
+      return client.execute(request).aggregate().join()
     }
 
     then:
     responses.each { response ->
-      assert response.code() == SUCCESS.status
-      assert response.body().string() == SUCCESS.body
+      assert response.status().code() == SUCCESS.status
+      assert response.contentUtf8() == SUCCESS.body
     }
 
     and:
@@ -145,26 +138,10 @@ abstract class TomcatServlet3Test extends AbstractServlet3Test<Tomcat, Context> 
       def loggedTraces = accessLogValue.loggedIds*.first
       def loggedSpans = accessLogValue.loggedIds*.second
 
-      def expectedCount = 2
-      if (hasIncludeSpan()) {
-        expectedCount++
-      }
-      if (hasForwardSpan()) {
-        expectedCount++
-      }
       (0..count - 1).each {
-        trace(it, expectedCount) {
+        trace(it, 2) {
           serverSpan(it, 0, null, null, "GET", SUCCESS.body.length())
-          def controllerIndex = 1
-          if (hasIncludeSpan()) {
-            includeSpan(it, 1, span(0))
-            controllerIndex++
-          }
-          if (hasForwardSpan()) {
-            forwardSpan(it, 1, span(0))
-            controllerIndex++
-          }
-          controllerSpan(it, controllerIndex, span(controllerIndex - 1))
+          controllerSpan(it, 1, span(0))
         }
 
         assert loggedTraces.contains(traces[it][0].traceId)
@@ -174,36 +151,28 @@ abstract class TomcatServlet3Test extends AbstractServlet3Test<Tomcat, Context> 
 
     where:
     method = "GET"
-    body = null
     count << [1, 4] // make multiple requests.
   }
 
   def "access log has ids for error request"() {
     setup:
     assumeTrue(testError())
-    def request = request(ERROR, method, body).build()
-    def response = client.newCall(request).execute()
+    def request = request(ERROR, method)
+    def response = client.execute(request).aggregate().join()
 
     expect:
-    response.code() == ERROR.status
-    response.body().string() == ERROR.body
+    response.status().code() == ERROR.status
+    response.contentUtf8() == ERROR.body
 
     and:
     def spanCount = 2
     if (errorEndpointUsesSendError()) {
       spanCount++
     }
-    if (hasForwardSpan()) {
-      spanCount++
-    }
     assertTraces(1) {
       trace(0, spanCount) {
-        serverSpan(it, 0, null, null, method, response.body().contentLength(), ERROR)
+        serverSpan(it, 0, null, null, method, response.content().length(), ERROR)
         def spanIndex = 1
-        if (hasForwardSpan()) {
-          forwardSpan(it, spanIndex, span(spanIndex - 1))
-          spanIndex++
-        }
         controllerSpan(it, spanIndex, span(spanIndex - 1))
         spanIndex++
         if (errorEndpointUsesSendError()) {
@@ -220,7 +189,6 @@ abstract class TomcatServlet3Test extends AbstractServlet3Test<Tomcat, Context> 
 
     where:
     method = "GET"
-    body = null
   }
 
   // FIXME: Add authentication tests back in...
@@ -280,8 +248,8 @@ class TestAccessLogValve extends ValveBase implements AccessLog {
 
   void log(Request request, Response response, long time) {
     synchronized (loggedIds) {
-      loggedIds.add(new Tuple2(request.getAttribute("traceId"),
-        request.getAttribute("spanId")))
+      loggedIds.add(new Tuple2(request.getAttribute("trace_id"),
+        request.getAttribute("span_id")))
       loggedIds.notifyAll()
     }
   }
@@ -342,6 +310,11 @@ class TomcatServlet3TestAsync extends TomcatServlet3Test {
     // https://github.com/open-telemetry/opentelemetry-java-instrumentation/issues/807
     return false
   }
+
+  @Override
+  boolean testConcurrency() {
+    return true
+  }
 }
 
 class TomcatServlet3TestFakeAsync extends TomcatServlet3Test {
@@ -356,6 +329,11 @@ class TomcatServlet3TestFakeAsync extends TomcatServlet3Test {
     // https://github.com/open-telemetry/opentelemetry-java-instrumentation/issues/807
     return false
   }
+
+  @Override
+  boolean testConcurrency() {
+    return true
+  }
 }
 
 class TomcatServlet3TestForward extends TomcatDispatchTest {
@@ -367,11 +345,6 @@ class TomcatServlet3TestForward extends TomcatDispatchTest {
   @Override
   boolean testNotFound() {
     false
-  }
-
-  @Override
-  boolean hasForwardSpan() {
-    true
   }
 
   @Override
@@ -406,11 +379,6 @@ class TomcatServlet3TestInclude extends TomcatDispatchTest {
   @Override
   boolean testError() {
     false
-  }
-
-  @Override
-  boolean hasIncludeSpan() {
-    true
   }
 
   @Override

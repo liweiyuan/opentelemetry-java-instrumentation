@@ -1,12 +1,12 @@
 plugins {
-  id "com.github.johnrengelman.shadow"
+  id("com.github.johnrengelman.shadow")
+
+  id("otel.java-conventions")
 }
 
-apply from: "$rootDir/gradle/java.gradle"
-
 dependencies {
-  implementation deps.opentelemetryExtAnnotations
-  implementation deps.opentelemetryContext
+  implementation "io.opentelemetry:opentelemetry-extension-annotations"
+  implementation "io.opentelemetry:opentelemetry-context"
 }
 
 // OpenTelemetry API shaded so that it can be used in instrumentation of OpenTelemetry API itself,

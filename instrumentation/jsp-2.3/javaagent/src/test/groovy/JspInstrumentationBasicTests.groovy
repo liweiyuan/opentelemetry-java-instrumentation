@@ -4,17 +4,17 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.SERVER
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
-import io.opentelemetry.instrumentation.test.utils.OkHttpUtils
 import io.opentelemetry.instrumentation.test.utils.PortUtils
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
+import io.opentelemetry.testing.internal.armeria.client.WebClient
+import io.opentelemetry.testing.internal.armeria.common.AggregatedHttpResponse
+import io.opentelemetry.testing.internal.armeria.common.HttpMethod
+import io.opentelemetry.testing.internal.armeria.common.MediaType
+import io.opentelemetry.testing.internal.armeria.common.RequestHeaders
 import java.nio.file.Files
-import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody
-import okhttp3.Response
 import org.apache.catalina.Context
 import org.apache.catalina.startup.Tomcat
 import org.apache.jasper.JasperException
@@ -38,13 +38,14 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
   @Shared
   String baseUrl
 
-  OkHttpClient client = OkHttpUtils.client()
+  @Shared
+  WebClient client
 
   def setupSpec() {
     baseDir = Files.createTempDirectory("jsp").toFile()
     baseDir.deleteOnExit()
 
-    port = PortUtils.randomOpenPort()
+    port = PortUtils.findOpenPort()
 
     tomcatServer = new Tomcat()
     tomcatServer.setBaseDir(baseDir.getAbsolutePath())
@@ -57,6 +58,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
     // https://stackoverflow.com/questions/48998387/code-works-with-embedded-apache-tomcat-8-but-not-with-9-whats-changed
     tomcatServer.getConnector()
     baseUrl = "http://localhost:$port/$jspWebappContext"
+    client = WebClient.of(baseUrl)
 
     appContext = tomcatServer.addWebapp("/$jspWebappContext",
       JspInstrumentationBasicTests.getResource("/webapps/jsptest").getPath())
@@ -73,12 +75,8 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
 
   @Unroll
   def "non-erroneous GET #test test"() {
-    setup:
-    String reqUrl = baseUrl + "/$jspFileName"
-    def req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/${jspFileName}").aggregate().join()
 
     then:
     assertTraces(1) {
@@ -87,7 +85,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
           hasNoParent()
           name "/$jspWebappContext/$jspFileName"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -102,7 +99,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /$jspFileName"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.$jspClassNamePrefix$jspClassName"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -111,17 +107,13 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /$jspFileName"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/${jspFileName}"
           }
         }
       }
     }
-    res.code() == 200
-
-    cleanup:
-    res.close()
+    res.status().code() == 200
 
     where:
     test                  | jspFileName         | jspClassName        | jspClassNamePrefix
@@ -133,11 +125,9 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
   def "non-erroneous GET with query string"() {
     setup:
     String queryString = "HELLO"
-    String reqUrl = baseUrl + "/getQuery.jsp"
-    Request req = new Request.Builder().url(new URL(reqUrl + "?" + queryString)).get().build()
 
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/getQuery.jsp?${queryString}").aggregate().join()
 
     then:
     assertTraces(1) {
@@ -146,7 +136,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
           hasNoParent()
           name "/$jspWebappContext/getQuery.jsp"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -161,7 +150,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /getQuery.jsp"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.getQuery_jsp"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -170,30 +158,23 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /getQuery.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/getQuery.jsp"
           }
         }
       }
     }
-    res.code() == 200
-
-    cleanup:
-    res.close()
+    res.status().code() == 200
   }
 
   def "non-erroneous POST"() {
     setup:
-    String reqUrl = baseUrl + "/post.jsp"
-    RequestBody requestBody = new MultipartBody.Builder()
-      .setType(MultipartBody.FORM)
-      .addFormDataPart("name", "world")
+    RequestHeaders headers = RequestHeaders.builder(HttpMethod.POST, "/post.jsp")
+      .contentType(MediaType.FORM_DATA)
       .build()
-    Request req = new Request.Builder().url(new URL(reqUrl)).post(requestBody).build()
 
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.execute(headers, "name=world").aggregate().join()
 
     then:
     assertTraces(1) {
@@ -202,7 +183,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
           hasNoParent()
           name "/$jspWebappContext/post.jsp"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -217,7 +197,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /post.jsp"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.post_jsp"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -226,27 +205,19 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /post.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/post.jsp"
           }
         }
       }
     }
-    res.code() == 200
-
-    cleanup:
-    res.close()
+    res.status().code() == 200
   }
 
   @Unroll
   def "erroneous runtime errors GET jsp with #test test"() {
-    setup:
-    String reqUrl = baseUrl + "/$jspFileName"
-    def req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/${jspFileName}").aggregate().join()
 
     then:
     assertTraces(1) {
@@ -255,7 +226,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
           hasNoParent()
           name "/$jspWebappContext/$jspFileName"
           kind SERVER
-          errored true
+          status ERROR
           event(0) {
             eventName(SemanticAttributes.EXCEPTION_EVENT_NAME)
             attributes {
@@ -282,7 +253,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /$jspFileName"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.$jspClassName"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -291,7 +261,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /$jspFileName"
-          errored true
+          status ERROR
           event(0) {
             eventName(SemanticAttributes.EXCEPTION_EVENT_NAME)
             attributes {
@@ -305,15 +275,12 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
             }
           }
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/${jspFileName}"
           }
         }
       }
     }
-    res.code() == 500
-
-    cleanup:
-    res.close()
+    res.status().code() == 500
 
     where:
     test                       | jspFileName        | jspClassName       | exceptionClass            | errorMessageOptional
@@ -323,21 +290,16 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
   }
 
   def "non-erroneous include plain HTML GET"() {
-    setup:
-    String reqUrl = baseUrl + "/includes/includeHtml.jsp"
-    Request req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/includes/includeHtml.jsp").aggregate().join()
 
     then:
     assertTraces(1) {
-      trace(0, 4) {
+      trace(0, 3) {
         span(0) {
           hasNoParent()
           name "/$jspWebappContext/includes/includeHtml.jsp"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -352,7 +314,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /includes/includeHtml.jsp"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.includes.includeHtml_jsp"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -361,40 +322,26 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /includes/includeHtml.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/includes/includeHtml.jsp"
           }
-        }
-        span(3) {
-          childOf span(2)
-          name "ApplicationDispatcher.include"
-          errored false
         }
       }
     }
-    res.code() == 200
-
-    cleanup:
-    res.close()
+    res.status().code() == 200
   }
 
   def "non-erroneous multi GET"() {
-    setup:
-    String reqUrl = baseUrl + "/includes/includeMulti.jsp"
-    Request req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/includes/includeMulti.jsp").aggregate().join()
 
     then:
     assertTraces(1) {
-      trace(0, 9) {
+      trace(0, 7) {
         span(0) {
           hasNoParent()
           name "/$jspWebappContext/includes/includeMulti.jsp"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -409,7 +356,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /includes/includeMulti.jsp"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.includes.includeMulti_jsp"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
@@ -418,70 +364,48 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(2) {
           childOf span(0)
           name "Render /includes/includeMulti.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/includes/includeMulti.jsp"
           }
         }
         span(3) {
           childOf span(2)
-          name "ApplicationDispatcher.include"
-          errored false
-        }
-        span(4) {
-          childOf span(3)
           name "Compile /common/javaLoopH2.jsp"
-          errored false
           attributes {
             "jsp.classFQCN" "org.apache.jsp.common.javaLoopH2_jsp"
             "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
           }
         }
-        span(5) {
-          childOf span(3)
+        span(4) {
+          childOf span(2)
           name "Render /common/javaLoopH2.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/includes/includeMulti.jsp"
+          }
+        }
+        span(5) {
+          childOf span(2)
+          name "Compile /common/javaLoopH2.jsp"
+          attributes {
+            "jsp.classFQCN" "org.apache.jsp.common.javaLoopH2_jsp"
+            "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
           }
         }
         span(6) {
           childOf span(2)
-          name "ApplicationDispatcher.include"
-          errored false
-        }
-        span(7) {
-          childOf span(6)
-          name "Compile /common/javaLoopH2.jsp"
-          errored false
-          attributes {
-            "jsp.classFQCN" "org.apache.jsp.common.javaLoopH2_jsp"
-            "jsp.compiler" "org.apache.jasper.compiler.JDTCompiler"
-          }
-        }
-        span(8) {
-          childOf span(6)
           name "Render /common/javaLoopH2.jsp"
-          errored false
           attributes {
-            "jsp.requestURL" reqUrl
+            "jsp.requestURL" "${baseUrl}/includes/includeMulti.jsp"
           }
         }
       }
     }
-    res.code() == 200
-
-    cleanup:
-    res.close()
+    res.status().code() == 200
   }
 
   def "#test compile error should not produce render traces and spans"() {
-    setup:
-    String reqUrl = baseUrl + "/$jspFileName"
-    Request req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/${jspFileName}").aggregate().join()
 
     then:
     assertTraces(1) {
@@ -490,7 +414,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
           hasNoParent()
           name "/$jspWebappContext/$jspFileName"
           kind SERVER
-          errored true
+          status ERROR
           errorEvent(JasperException, String)
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
@@ -506,7 +430,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         span(1) {
           childOf span(0)
           name "Compile /$jspFileName"
-          errored true
+          status ERROR
           errorEvent(JasperException, String)
           attributes {
             "jsp.classFQCN" "org.apache.jsp.$jspClassNamePrefix$jspClassName"
@@ -515,10 +439,7 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         }
       }
     }
-    res.code() == 500
-
-    cleanup:
-    res.close()
+    res.status().code() == 500
 
     where:
     test      | jspFileName                            | jspClassName                  | jspClassNamePrefix
@@ -527,22 +448,17 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
   }
 
   def "direct static file reference"() {
-    setup:
-    String reqUrl = baseUrl + "/$staticFile"
-    def req = new Request.Builder().url(new URL(reqUrl)).get().build()
-
     when:
-    Response res = client.newCall(req).execute()
+    AggregatedHttpResponse res = client.get("/${staticFile}").aggregate().join()
 
     then:
-    res.code() == 200
+    res.status().code() == 200
     assertTraces(1) {
       trace(0, 1) {
         span(0) {
           hasNoParent()
           name "/$jspWebappContext/*"
           kind SERVER
-          errored false
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
@@ -556,9 +472,6 @@ class JspInstrumentationBasicTests extends AgentInstrumentationSpecification {
         }
       }
     }
-
-    cleanup:
-    res.close()
 
     where:
     staticFile = "common/hello.html"

@@ -13,13 +13,11 @@ import static net.bytebuddy.matcher.ElementMatchers.returns;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
-import io.opentelemetry.javaagent.tooling.TypeInstrumentation;
-import java.util.HashMap;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import net.bytebuddy.asm.Advice;
-import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -32,32 +30,31 @@ public class KafkaConsumerInstrumentation implements TypeInstrumentation {
   }
 
   @Override
-  public Map<? extends ElementMatcher<? super MethodDescription>, String> transformers() {
-    Map<ElementMatcher<? super MethodDescription>, String> transformers = new HashMap<>();
-    transformers.put(
+  public void transform(TypeTransformer transformer) {
+    transformer.applyAdviceToMethod(
         isMethod()
             .and(isPublic())
             .and(named("records"))
             .and(takesArgument(0, String.class))
             .and(returns(Iterable.class)),
         KafkaConsumerInstrumentation.class.getName() + "$IterableAdvice");
-    transformers.put(
+    transformer.applyAdviceToMethod(
         isMethod()
             .and(isPublic())
             .and(named("records"))
             .and(takesArgument(0, named("org.apache.kafka.common.TopicPartition")))
             .and(returns(List.class)),
         KafkaConsumerInstrumentation.class.getName() + "$ListAdvice");
-    transformers.put(
+    transformer.applyAdviceToMethod(
         isMethod()
             .and(isPublic())
             .and(named("iterator"))
             .and(takesArguments(0))
             .and(returns(Iterator.class)),
         KafkaConsumerInstrumentation.class.getName() + "$IteratorAdvice");
-    return transformers;
   }
 
+  @SuppressWarnings("unused")
   public static class IterableAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class)
@@ -69,6 +66,7 @@ public class KafkaConsumerInstrumentation implements TypeInstrumentation {
     }
   }
 
+  @SuppressWarnings("unused")
   public static class ListAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class)
@@ -79,6 +77,7 @@ public class KafkaConsumerInstrumentation implements TypeInstrumentation {
     }
   }
 
+  @SuppressWarnings("unused")
   public static class IteratorAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class)

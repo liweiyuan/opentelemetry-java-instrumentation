@@ -12,6 +12,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
 import io.opentelemetry.instrumentation.api.tracer.HttpClientTracer;
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes;
 import java.net.URI;
 import java.net.URISyntaxException;
 import org.apache.http.Header;
@@ -28,17 +29,16 @@ public class ApacheHttpAsyncClientTracer
 
   private static final ApacheHttpAsyncClientTracer TRACER = new ApacheHttpAsyncClientTracer();
 
+  private ApacheHttpAsyncClientTracer() {
+    super(NetPeerAttributes.INSTANCE);
+  }
+
   public static ApacheHttpAsyncClientTracer tracer() {
     return TRACER;
   }
 
   public Context startSpan(Context parentContext) {
-    Span span =
-        tracer
-            .spanBuilder(DEFAULT_SPAN_NAME)
-            .setSpanKind(CLIENT)
-            .setParent(parentContext)
-            .startSpan();
+    Span span = spanBuilder(parentContext, DEFAULT_SPAN_NAME, CLIENT).startSpan();
     return withClientSpan(parentContext, span);
   }
 
@@ -53,7 +53,8 @@ public class ApacheHttpAsyncClientTracer
   }
 
   @Override
-  protected @Nullable String flavor(HttpRequest httpRequest) {
+  @Nullable
+  protected String flavor(HttpRequest httpRequest) {
     return httpRequest.getProtocolVersion().toString();
   }
 

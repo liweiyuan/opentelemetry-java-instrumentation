@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.exporter.logging.LoggingSpanExporter;
-import io.opentelemetry.instrumentation.spring.autoconfigure.TracerAutoConfiguration;
+import io.opentelemetry.instrumentation.spring.autoconfigure.OpenTelemetryAutoConfiguration;
 import io.opentelemetry.instrumentation.spring.autoconfigure.exporters.logging.LoggingSpanExporterAutoConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,7 +24,8 @@ class LoggingSpanExporterAutoConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(
               AutoConfigurations.of(
-                  TracerAutoConfiguration.class, LoggingSpanExporterAutoConfiguration.class));
+                  OpenTelemetryAutoConfiguration.class,
+                  LoggingSpanExporterAutoConfiguration.class));
 
   @AfterEach
   void tearDown() {
@@ -35,23 +36,19 @@ class LoggingSpanExporterAutoConfigurationTest {
   @DisplayName("when exporters are ENABLED should initialize LoggingSpanExporter bean")
   void exportersEnabled() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.exporters.logging.enabled=true")
+        .withPropertyValues("otel.exporter.logging.enabled=true")
         .run(
-            (context) -> {
-              assertThat(context.getBean("otelLoggingSpanExporter", LoggingSpanExporter.class))
-                  .isNotNull();
-            });
+            context ->
+                assertThat(context.getBean("otelLoggingSpanExporter", LoggingSpanExporter.class))
+                    .isNotNull());
   }
 
   @Test
   @DisplayName("when exporters are DISABLED should NOT initialize LoggingSpanExporter bean")
   void disabledProperty() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.exporter.logging.enabled=false")
-        .run(
-            (context) -> {
-              assertThat(context.containsBean("otelLoggingSpanExporter")).isFalse();
-            });
+        .withPropertyValues("otel.exporter.logging.enabled=false")
+        .run(context -> assertThat(context.containsBean("otelLoggingSpanExporter")).isFalse());
   }
 
   @Test
@@ -59,9 +56,8 @@ class LoggingSpanExporterAutoConfigurationTest {
       "when exporter enabled property is MISSING should initialize LoggingSpanExporter bean")
   void noProperty() {
     this.contextRunner.run(
-        (context) -> {
-          assertThat(context.getBean("otelLoggingSpanExporter", LoggingSpanExporter.class))
-              .isNotNull();
-        });
+        context ->
+            assertThat(context.getBean("otelLoggingSpanExporter", LoggingSpanExporter.class))
+                .isNotNull());
   }
 }

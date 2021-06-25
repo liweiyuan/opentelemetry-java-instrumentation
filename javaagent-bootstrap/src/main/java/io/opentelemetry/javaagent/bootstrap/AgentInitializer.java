@@ -5,11 +5,11 @@
 
 package io.opentelemetry.javaagent.bootstrap;
 
+import java.io.File;
 import java.lang.instrument.Instrumentation;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.URL;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * Agent start up logic.
@@ -19,34 +19,34 @@ import java.net.URL;
  * <p>The intention is for this class to be loaded by bootstrap classloader to make sure we have
  * unimpeded access to the rest of agent parts.
  */
-public class AgentInitializer {
+public final class AgentInitializer {
 
   // Accessed via reflection from tests.
   // fields must be managed under class lock
-  private static ClassLoader AGENT_CLASSLOADER = null;
+  @Nullable private static ClassLoader agentClassLoader = null;
 
   // called via reflection in the OpenTelemetryAgent class
-  public static void initialize(Instrumentation inst, URL bootstrapUrl) throws Exception {
-    startAgent(inst, bootstrapUrl);
-  }
+  public static void initialize(Instrumentation inst, File javaagentFile) throws Exception {
+    if (agentClassLoader == null) {
+      agentClassLoader = createAgentClassLoader("inst", javaagentFile);
 
-  private static synchronized void startAgent(Instrumentation inst, URL bootstrapUrl)
-      throws Exception {
-    if (AGENT_CLASSLOADER == null) {
-      ClassLoader agentClassLoader = createAgentClassLoader("inst", bootstrapUrl);
       Class<?> agentInstallerClass =
           agentClassLoader.loadClass("io.opentelemetry.javaagent.tooling.AgentInstaller");
       Method agentInstallerMethod =
           agentInstallerClass.getMethod("installBytebuddyAgent", Instrumentation.class);
       ClassLoader savedContextClassLoader = Thread.currentThread().getContextClassLoader();
       try {
-        Thread.currentThread().setContextClassLoader(AGENT_CLASSLOADER);
+        Thread.currentThread().setContextClassLoader(agentClassLoader);
         agentInstallerMethod.invoke(null, inst);
       } finally {
         Thread.currentThread().setContextClassLoader(savedContextClassLoader);
       }
-      AGENT_CLASSLOADER = agentClassLoader;
     }
+  }
+
+  // TODO misleading name
+  public static synchronized ClassLoader getAgentClassLoader() {
+    return agentClassLoader;
   }
 
   /**
@@ -57,7 +57,7 @@ public class AgentInitializer {
    *     classloader
    * @return Agent Classloader
    */
-  private static ClassLoader createAgentClassLoader(String innerJarFilename, URL bootstrapUrl)
+  private static ClassLoader createAgentClassLoader(String innerJarFilename, File javaagentFile)
       throws Exception {
     ClassLoader agentParent;
     if (isJavaBefore9()) {
@@ -67,19 +67,22 @@ public class AgentInitializer {
       agentParent = getPlatformClassLoader();
     }
 
-    Class<?> loaderClass =
-        ClassLoader.getSystemClassLoader()
-            .loadClass("io.opentelemetry.javaagent.bootstrap.AgentClassLoader");
-    Constructor constructor =
-        loaderClass.getDeclaredConstructor(URL.class, String.class, ClassLoader.class);
-    return (ClassLoader) constructor.newInstance(bootstrapUrl, innerJarFilename, agentParent);
+    ClassLoader agentClassLoader =
+        new AgentClassLoader(javaagentFile, innerJarFilename, agentParent);
+
+    Class<?> extensionClassLoaderClass =
+        agentClassLoader.loadClass("io.opentelemetry.javaagent.tooling.ExtensionClassLoader");
+    return (ClassLoader)
+        extensionClassLoaderClass
+            .getDeclaredMethod("getInstance", ClassLoader.class, File.class)
+            .invoke(null, agentClassLoader, javaagentFile);
   }
 
   private static ClassLoader getPlatformClassLoader()
       throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
     /*
      Must invoke ClassLoader.getPlatformClassLoader by reflection to remain
-     compatible with java 7 + 8.
+     compatible with java 8.
     */
     Method method = ClassLoader.class.getDeclaredMethod("getPlatformClassLoader");
     return (ClassLoader) method.invoke(null);
@@ -88,4 +91,6 @@ public class AgentInitializer {
   public static boolean isJavaBefore9() {
     return System.getProperty("java.version").startsWith("1.");
   }
+
+  private AgentInitializer() {}
 }

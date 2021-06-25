@@ -1,4 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
+plugins {
+  id("otel.javaagent-instrumentation")
+}
 
 muzzle {
 
@@ -13,7 +15,8 @@ muzzle {
     group = 'com.typesafe.play'
     module = 'play-ahc-ws-standalone_2.12'
     versions = '[2.0.0,2.1.0)'
-    skipVersions += '2.0.5' // Bad release
+    // 2.0.5 is missing play.shaded.ahc.org.asynchttpclient.AsyncHandler#onTlsHandshakeSuccess()V
+    skip('2.0.5')
     assertInverse = true
   }
 
@@ -38,6 +41,7 @@ dependencies {
   testInstrumentation project(':instrumentation:netty:netty-4.0:javaagent')
   testInstrumentation project(':instrumentation:netty:netty-4.1:javaagent')
   testInstrumentation project(':instrumentation:akka-http-10.0:javaagent')
+  testInstrumentation project(':instrumentation:akka-actor-2.5:javaagent')
 
   latestDepTestLibrary group: 'com.typesafe.play', name: "play-ahc-ws-standalone_$scalaVersion", version: '2.0.+'
 }

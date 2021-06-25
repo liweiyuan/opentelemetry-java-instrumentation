@@ -5,12 +5,9 @@
 
 package io.opentelemetry.javaagent.instrumentation.springwebmvc;
 
-import static io.opentelemetry.javaagent.instrumentation.springwebmvc.SpringWebMvcTracer.tracer;
-
-import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
-import io.opentelemetry.instrumentation.api.tracer.ServerSpan;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -24,6 +21,7 @@ import org.springframework.beans.factory.support.GenericBeanDefinition;
 import org.springframework.core.Ordered;
 import org.springframework.web.servlet.HandlerExecutionChain;
 import org.springframework.web.servlet.HandlerMapping;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 public class HandlerMappingResourceNameFilter implements Filter, Ordered {
   private volatile List<HandlerMapping> handlerMappings;
@@ -41,15 +39,14 @@ public class HandlerMappingResourceNameFilter implements Filter, Ordered {
     }
 
     Context context = Context.current();
-    Span serverSpan = ServerSpan.fromContextOrNull(context);
 
-    if (handlerMappings != null && serverSpan != null) {
+    if (handlerMappings != null) {
       try {
         if (findMapping((HttpServletRequest) request)) {
 
           // Name the parent span based on the matching pattern
           // Let the parent span resource name be set with the attribute set in findMapping.
-          tracer().onRequest(context, serverSpan, (HttpServletRequest) request);
+          ServerNameUpdater.updateServerSpanName(context, (HttpServletRequest) request);
         }
       } catch (Exception ignored) {
         // mapping.getHandler() threw exception.  Ignore
@@ -77,8 +74,39 @@ public class HandlerMappingResourceNameFilter implements Filter, Ordered {
     return false;
   }
 
-  public void setHandlerMappings(List<HandlerMapping> handlerMappings) {
-    this.handlerMappings = handlerMappings;
+  public void setHandlerMappings(List<HandlerMapping> mappings) {
+    List<HandlerMapping> handlerMappings = new ArrayList<>();
+    for (HandlerMapping mapping : mappings) {
+      // it may be enticing to add all HandlerMapping classes here, but DO NOT
+      //
+      // because we call getHandler() on them above, at the very beginning of the request
+      // and this can be a very invasive call with application-crashing side-effects
+      //
+      // for example: org.grails.web.mapping.mvc.UrlMappingsHandlerMapping.getHandler()
+      // 1. uses GrailsWebRequest.lookup() to get GrailsWebRequest bound to thread local
+      // 2. and populates the servlet request attribute "org.grails.url.match.info"
+      //    with GrailsControllerUrlMappingInfo
+      //
+      // which causes big problems if GrailsWebRequest thread local is leaked from prior request
+      // (which has been observed to happen in Grails 3.0.17 at least), because then our call to
+      // UrlMappingsHandlerMapping.getHandler() at the very beginning of the request:
+      // 1. GrailsWebRequest.lookup() gets the leaked GrailsWebRequest
+      // 2. servlet request attribute "org.grails.url.match.info" is populated based on this leaked
+      //    GrailsWebRequest (so in other words, most likely the wrong route is matched)
+      //
+      // and then GrailsWebRequestFilter creates a new GrailsWebRequest and binds it to the thread
+      //
+      // and then the application calls UrlMappingsHandlerMapping.getHandler() to route the request
+      // but it finds servlet request attribute "org.grails.url.match.info" already populated (by
+      // above) and so it short cuts the matching process and uses the wrong route that the agent
+      // populated caused to be populated into the request attribute above
+      if (mapping instanceof RequestMappingHandlerMapping) {
+        handlerMappings.add(mapping);
+      }
+    }
+    if (!handlerMappings.isEmpty()) {
+      this.handlerMappings = handlerMappings;
+    }
   }
 
   @Override

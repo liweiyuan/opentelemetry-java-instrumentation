@@ -5,10 +5,12 @@
 
 package muzzle;
 
+import external.instrumentation.ExternalHelper;
 import io.opentelemetry.instrumentation.OtherTestHelperClasses;
 import io.opentelemetry.instrumentation.TestHelperClasses.Helper;
 import net.bytebuddy.asm.Advice;
 
+@SuppressWarnings("ClassNamedLikeTypeParameter")
 public class TestClasses {
 
   public static class MethodBodyAdvice {
@@ -42,6 +44,7 @@ public class TestClasses {
         return s;
       }
 
+      @SuppressWarnings({"UnusedMethod", "MethodCanBeStatic"})
       private void privateStuff() {}
 
       protected void protectedMethod() {}
@@ -57,6 +60,11 @@ public class TestClasses {
     }
 
     public static class A2 extends A {}
+
+    public static class Primitives {
+      int number = 1;
+      boolean flag = false;
+    }
 
     public interface SomeInterface {
       void someMethod();
@@ -105,6 +113,12 @@ public class TestClasses {
   public static class HelperOtherAdvice {
     public static void adviceMethod() {
       new OtherTestHelperClasses.Bar().doSomething();
+    }
+  }
+
+  public static class ExternalInstrumentationAdvice {
+    public static void adviceMethod() {
+      new ExternalHelper().instrument();
     }
   }
 }

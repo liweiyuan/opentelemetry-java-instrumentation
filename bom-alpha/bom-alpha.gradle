@@ -1,15 +1,15 @@
 plugins {
   id("java-platform")
-}
 
-apply from: "$rootDir/gradle/publish.gradle"
+  id("otel.publish-conventions")
+}
 
 description = "OpenTelemetry Instrumentation Bill of Materials (Alpha)"
 group = "io.opentelemetry.instrumentation"
 archivesBaseName = "opentelemetry-instrumentation-bom-alpha"
 
 rootProject.subprojects.forEach { subproject ->
-  if (!project.name.startsWith("bom")) {
+  if (!subproject.name.startsWith("bom")) {
     evaluationDependsOn(subproject.path)
   }
 }
@@ -18,13 +18,16 @@ javaPlatform {
   allowDependencies()
 }
 
+def otelVersion = findProperty("otelVersion")
+
 dependencies {
-  api(platform("io.opentelemetry:opentelemetry-bom:${versions.opentelemetry}"))
-  api(platform("io.opentelemetry:opentelemetry-bom-alpha:${versions.opentelemetryAlpha}"))
+  api(platform("io.opentelemetry:opentelemetry-bom:${otelVersion}"))
+  api(platform("io.opentelemetry:opentelemetry-bom-alpha:${otelVersion}-alpha"))
 }
 
 afterEvaluate {
   dependencies {
+
     constraints {
       rootProject.subprojects.sort { "$it.archivesBaseName" }
         .collect { it }

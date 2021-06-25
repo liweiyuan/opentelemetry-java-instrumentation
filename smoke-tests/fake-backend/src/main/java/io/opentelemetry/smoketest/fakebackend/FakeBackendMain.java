@@ -30,6 +30,8 @@ import com.linecorp.armeria.server.Server;
 import com.linecorp.armeria.server.grpc.GrpcService;
 import com.linecorp.armeria.server.healthcheck.HealthCheckService;
 import io.netty.buffer.ByteBufOutputStream;
+import io.opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest;
+import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,6 +45,8 @@ public class FakeBackendMain {
     var marshaller =
         MessageMarshaller.builder()
             .register(ExportTraceServiceRequest.getDefaultInstance())
+            .register(ExportMetricsServiceRequest.getDefaultInstance())
+            .register(ExportLogsServiceRequest.getDefaultInstance())
             .build();
 
     var mapper = JsonMapper.builder();
@@ -57,27 +61,71 @@ public class FakeBackendMain {
             marshaller.writeValue(value, gen);
           }
         });
+    serializers.addSerializer(
+        new StdSerializer<>(ExportMetricsServiceRequest.class) {
+          @Override
+          public void serialize(
+              ExportMetricsServiceRequest value, JsonGenerator gen, SerializerProvider provider)
+              throws IOException {
+            marshaller.writeValue(value, gen);
+          }
+        });
+    serializers.addSerializer(
+        new StdSerializer<>(ExportLogsServiceRequest.class) {
+          @Override
+          public void serialize(
+              ExportLogsServiceRequest value, JsonGenerator gen, SerializerProvider provider)
+              throws IOException {
+            marshaller.writeValue(value, gen);
+          }
+        });
     module.setSerializers(serializers);
     mapper.addModule(module);
     OBJECT_MAPPER = mapper.build();
   }
 
   public static void main(String[] args) {
-    var collector = new FakeCollectorService();
+    var traceCollector = new FakeTraceCollectorService();
+    var metricsCollector = new FakeMetricsCollectorService();
+    var logsCollector = new FakeLogsCollectorService();
     var server =
         Server.builder()
             .http(8080)
-            .service(GrpcService.builder().addService(collector).build())
+            .service(GrpcService.builder()
+                .addService(traceCollector)
+                .addService(metricsCollector)
+                .addService(logsCollector)
+                .build())
             .service(
-                "/clear-requests",
+                "/clear",
                 (ctx, req) -> {
-                  collector.clearRequests();
+                  traceCollector.clearRequests();
+                  metricsCollector.clearRequests();
+                  logsCollector.clearRequests();
                   return HttpResponse.of(HttpStatus.OK);
                 })
             .service(
-                "/get-requests",
+                "/get-traces",
                 (ctx, req) -> {
-                  var requests = collector.getRequests();
+                  var requests = traceCollector.getRequests();
+                  var buf = new ByteBufOutputStream(ctx.alloc().buffer());
+                  OBJECT_MAPPER.writeValue((OutputStream) buf, requests);
+                  return HttpResponse.of(
+                      HttpStatus.OK, MediaType.JSON, HttpData.wrap(buf.buffer()));
+                })
+            .service(
+                "/get-metrics",
+                (ctx, req) -> {
+                  var requests = metricsCollector.getRequests();
+                  var buf = new ByteBufOutputStream(ctx.alloc().buffer());
+                  OBJECT_MAPPER.writeValue((OutputStream) buf, requests);
+                  return HttpResponse.of(
+                      HttpStatus.OK, MediaType.JSON, HttpData.wrap(buf.buffer()));
+                })
+            .service(
+                "/get-logs",
+                (ctx, req) -> {
+                  var requests = logsCollector.getRequests();
                   var buf = new ByteBufOutputStream(ctx.alloc().buffer());
                   OBJECT_MAPPER.writeValue((OutputStream) buf, requests);
                   return HttpResponse.of(

@@ -133,7 +133,6 @@
     <module name="OneStatementPerLine"/>
     <module name="MultipleVariableDeclarations"/>
     <module name="ArrayTypeStyle"/>
-    <module name="MissingSwitchDefault"/>
     <module name="FallThrough"/>
     <module name="UpperEll"/>
     <module name="ModifierOrder"/>
@@ -234,7 +233,8 @@
         value="Method type name ''{0}'' must match pattern ''{1}''."/>
     </module>
     <module name="InterfaceTypeParameterName">
-      <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+      <!-- modified from default Google Java Style -->
+      <property name="format" value="^[A-Z]+[0-9]?$"/>
       <message key="name.invalidPattern"
         value="Interface type name ''{0}'' must match pattern ''{1}''."/>
     </module>
@@ -261,8 +261,7 @@
     -->
     <module name="AbbreviationAsWordInName">
       <property name="ignoreFinal" value="false"/>
-      <!-- modified from default to support KHttp -->
-      <property name="allowedAbbreviationLength" value="1"/>
+      <property name="allowedAbbreviationLength" value="0"/>
       <property name="tokens"
         value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, ANNOTATION_DEF, ANNOTATION_FIELD_DEF,
                     PARAMETER_DEF, VARIABLE_DEF, METHOD_DEF, PATTERN_VARIABLE_DEF, RECORD_DEF,
@@ -375,7 +374,7 @@
   <!-- skip jflex generated files -->
   <module name="SuppressionSingleFilter">
     <property name="checks" value=".*"/>
-    <property name="files" value="javaagent-api[/\\]build[/\\]generated[/\\]jflex"/>
+    <property name="files" value="instrumentation-api[/\\]build[/\\]generated[/\\]jflex"/>
   </module>
   <module name="SuppressionSingleFilter">
     <property name="checks" value="MethodName"/>

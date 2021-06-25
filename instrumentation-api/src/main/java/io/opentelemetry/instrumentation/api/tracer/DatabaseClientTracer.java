@@ -10,7 +10,7 @@ import static io.opentelemetry.api.trace.SpanKind.CLIENT;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
-import io.opentelemetry.instrumentation.api.tracer.utils.NetPeerUtils;
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import java.net.InetSocketAddress;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -24,12 +24,17 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  */
 public abstract class DatabaseClientTracer<CONNECTION, STATEMENT, SANITIZEDSTATEMENT>
     extends BaseTracer {
-  protected static final String DB_QUERY = "DB Query";
+  private static final String DB_QUERY = "DB Query";
 
-  public DatabaseClientTracer() {}
+  protected final NetPeerAttributes netPeerAttributes;
 
-  public DatabaseClientTracer(OpenTelemetry openTelemetry) {
+  protected DatabaseClientTracer(NetPeerAttributes netPeerAttributes) {
+    this.netPeerAttributes = netPeerAttributes;
+  }
+
+  protected DatabaseClientTracer(OpenTelemetry openTelemetry, NetPeerAttributes netPeerAttributes) {
     super(openTelemetry);
+    this.netPeerAttributes = netPeerAttributes;
   }
 
   public boolean shouldStartSpan(Context parentContext) {
@@ -40,10 +45,7 @@ public abstract class DatabaseClientTracer<CONNECTION, STATEMENT, SANITIZEDSTATE
     SANITIZEDSTATEMENT sanitizedStatement = sanitizeStatement(statement);
 
     SpanBuilder span =
-        tracer
-            .spanBuilder(spanName(connection, statement, sanitizedStatement))
-            .setParent(parentContext)
-            .setSpanKind(CLIENT)
+        spanBuilder(parentContext, spanName(connection, statement, sanitizedStatement), CLIENT)
             .setAttribute(SemanticAttributes.DB_SYSTEM, dbSystem(connection));
 
     if (connection != null) {
@@ -119,14 +121,16 @@ public abstract class DatabaseClientTracer<CONNECTION, STATEMENT, SANITIZEDSTATE
     return null;
   }
 
+  @Nullable
   protected String dbConnectionString(CONNECTION connection) {
     return null;
   }
 
   protected void setNetSemanticConvention(SpanBuilder span, CONNECTION connection) {
-    NetPeerUtils.INSTANCE.setNetPeer(span, peerAddress(connection));
+    netPeerAttributes.setNetPeer(span, peerAddress(connection));
   }
 
+  @Nullable
   protected abstract InetSocketAddress peerAddress(CONNECTION connection);
 
   protected void onStatement(

@@ -3,13 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import static io.opentelemetry.api.trace.SpanKind.INTERNAL
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.NOT_FOUND
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.PATH_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
+import static io.opentelemetry.instrumentation.test.utils.TraceUtils.basicServerSpan
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.basicSpan
 
-import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.instrumentation.test.AgentTestTrait
 import io.opentelemetry.instrumentation.test.asserts.TraceAssert
 import io.opentelemetry.instrumentation.test.base.HttpServerTest
@@ -17,7 +20,6 @@ import io.opentelemetry.sdk.trace.data.SpanData
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
 import io.opentelemetry.struts.GreetingServlet
 import javax.servlet.DispatcherType
-import okhttp3.HttpUrl
 import org.apache.struts2.dispatcher.ng.filter.StrutsPrepareAndExecuteFilter
 import org.eclipse.jetty.server.Server
 import org.eclipse.jetty.servlet.DefaultServlet
@@ -25,11 +27,6 @@ import org.eclipse.jetty.servlet.ServletContextHandler
 import org.eclipse.jetty.util.resource.FileResource
 
 class Struts2ActionSpanTest extends HttpServerTest<Server> implements AgentTestTrait {
-
-  @Override
-  boolean testNotFound() {
-    return false
-  }
 
   @Override
   boolean testPathParam() {
@@ -42,13 +39,13 @@ class Struts2ActionSpanTest extends HttpServerTest<Server> implements AgentTestT
   }
 
   @Override
-  boolean hasHandlerSpan() {
-    return true
+  boolean hasHandlerSpan(ServerEndpoint endpoint) {
+    return endpoint != NOT_FOUND
   }
 
   @Override
   boolean hasResponseSpan(ServerEndpoint endpoint) {
-    endpoint == REDIRECT || endpoint == ERROR || endpoint == EXCEPTION
+    endpoint == REDIRECT || endpoint == ERROR || endpoint == EXCEPTION || endpoint == NOT_FOUND
   }
 
   @Override
@@ -59,22 +56,30 @@ class Struts2ActionSpanTest extends HttpServerTest<Server> implements AgentTestT
         break
       case ERROR:
       case EXCEPTION:
+      case NOT_FOUND:
         sendErrorSpan(trace, index, handlerSpan)
         break
     }
   }
 
   String expectedServerSpanName(ServerEndpoint endpoint) {
-    return endpoint == PATH_PARAM ? getContextPath() + "/path/{id}/param" : endpoint.resolvePath(address).path
+    switch (endpoint) {
+      case PATH_PARAM:
+        return getContextPath() + "/path/{id}/param"
+      case NOT_FOUND:
+        return getContextPath() + "/*"
+      default:
+        return endpoint.resolvePath(address).path
+    }
   }
 
   @Override
   void handlerSpan(TraceAssert trace, int index, Object parent, String method, ServerEndpoint endpoint) {
     trace.span(index) {
       name "GreetingAction.${endpoint.name().toLowerCase()}"
-      kind SpanKind.INTERNAL
-      errored endpoint == EXCEPTION
+      kind INTERNAL
       if (endpoint == EXCEPTION) {
+        status StatusCode.ERROR
         errorEvent(Exception, EXCEPTION.body)
       }
       def expectedMethodName = endpoint.name().toLowerCase()
@@ -119,21 +124,17 @@ class Struts2ActionSpanTest extends HttpServerTest<Server> implements AgentTestT
   // does not overwrite server span name given by struts instrumentation.
   def "test dispatch to servlet"() {
     setup:
-    def url = HttpUrl.get(address.resolve("dispatch")).newBuilder()
-      .build()
-    def request = request(url, "GET", null).build()
-    def response = client.newCall(request).execute()
+    def response = client.get(address.resolve("dispatch").toString()).aggregate().join()
 
     expect:
-    response.code() == 200
-    response.body().string() == "greeting"
+    response.status().code() == 200
+    response.contentUtf8() == "greeting"
 
     and:
     assertTraces(1) {
-      trace(0, 3) {
-        basicSpan(it, 0, getContextPath() + "/dispatch", null)
+      trace(0, 2) {
+        basicServerSpan(it, 0, getContextPath() + "/dispatch", null)
         basicSpan(it, 1, "GreetingAction.dispatch_servlet", span(0))
-        basicSpan(it, 2, "Dispatcher.forward", span(0))
       }
     }
   }

@@ -13,36 +13,34 @@ import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
-import io.opentelemetry.javaagent.tooling.TypeInstrumentation;
-import java.util.HashMap;
-import java.util.Map;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
 import net.bytebuddy.asm.Advice;
-import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 
 public class JsrChunkProcessorInstrumentation implements TypeInstrumentation {
   @Override
-  public ElementMatcher<? super TypeDescription> typeMatcher() {
+  public ElementMatcher<TypeDescription> typeMatcher() {
     return named("org.springframework.batch.core.jsr.step.item.JsrChunkProcessor");
   }
 
   @Override
-  public Map<? extends ElementMatcher<? super MethodDescription>, String> transformers() {
-    Map<ElementMatcher<? super MethodDescription>, String> transformers = new HashMap<>();
-    transformers.put(
+  public void transform(TypeTransformer transformer) {
+    transformer.applyAdviceToMethod(
         isProtected().and(named("doProvide")).and(takesArguments(2)),
         this.getClass().getName() + "$ProvideAdvice");
-    transformers.put(
+    transformer.applyAdviceToMethod(
         isProtected().and(named("doTransform")).and(takesArguments(1)),
         this.getClass().getName() + "$TransformAdvice");
-    transformers.put(
+    transformer.applyAdviceToMethod(
         isProtected().and(named("doPersist")).and(takesArguments(2)),
         this.getClass().getName() + "$PersistAdvice");
-    return transformers;
   }
 
+  @SuppressWarnings("unused")
   public static class ProvideAdvice {
+
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void onEnter(
         @Advice.Local("otelContext") Context context, @Advice.Local("otelScope") Scope scope) {
@@ -71,7 +69,9 @@ public class JsrChunkProcessorInstrumentation implements TypeInstrumentation {
     }
   }
 
+  @SuppressWarnings("unused")
   public static class TransformAdvice {
+
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void onEnter(
         @Advice.Local("otelContext") Context context, @Advice.Local("otelScope") Scope scope) {
@@ -100,7 +100,9 @@ public class JsrChunkProcessorInstrumentation implements TypeInstrumentation {
     }
   }
 
+  @SuppressWarnings("unused")
   public static class PersistAdvice {
+
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void onEnter(
         @Advice.Local("otelContext") Context context, @Advice.Local("otelScope") Scope scope) {

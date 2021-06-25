@@ -5,14 +5,17 @@
 
 import static io.opentelemetry.api.trace.SpanKind.INTERNAL
 import static io.opentelemetry.api.trace.SpanKind.SERVER
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 
-import io.opentelemetry.instrumentation.api.config.Config
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
-import io.opentelemetry.instrumentation.test.utils.OkHttpUtils
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody
+import io.opentelemetry.testing.internal.armeria.client.ClientRequestContext
+import io.opentelemetry.testing.internal.armeria.client.DecoratingHttpClientFunction
+import io.opentelemetry.testing.internal.armeria.client.HttpClient
+import io.opentelemetry.testing.internal.armeria.client.WebClient
+import io.opentelemetry.testing.internal.armeria.common.HttpHeaderNames
+import io.opentelemetry.testing.internal.armeria.common.HttpRequest
+import io.opentelemetry.testing.internal.armeria.common.HttpResponse
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.web.embedded.netty.NettyReactiveWebServerFactory
@@ -23,11 +26,10 @@ import server.EchoHandlerFunction
 import server.FooModel
 import server.SpringWebFluxTestApplication
 import server.TestController
+import spock.lang.Unroll
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = [SpringWebFluxTestApplication, ForceNettyAutoConfiguration])
 class SpringWebfluxTest extends AgentInstrumentationSpecification {
-  static Config previousConfig
-
   @TestConfiguration
   static class ForceNettyAutoConfiguration {
     @Bean
@@ -36,25 +38,39 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
     }
   }
 
-  static final okhttp3.MediaType PLAIN_TYPE = okhttp3.MediaType.parse("text/plain; charset=utf-8")
   static final String INNER_HANDLER_FUNCTION_CLASS_TAG_PREFIX = SpringWebFluxTestApplication.getName() + "\$"
   static final String SPRING_APP_CLASS_ANON_NESTED_CLASS_PREFIX = SpringWebFluxTestApplication.getSimpleName() + "\$"
 
   @LocalServerPort
-  private int port
+  int port
 
-  OkHttpClient client = OkHttpUtils.client(true)
+  WebClient client
 
+  def setup() {
+    client = WebClient.builder("h1c://localhost:$port")
+      .decorator(new DecoratingHttpClientFunction() {
+        // https://github.com/line/armeria/issues/2489
+        @Override
+        HttpResponse execute(HttpClient delegate, ClientRequestContext ctx, HttpRequest req) throws Exception {
+          return HttpResponse.from(delegate.execute(ctx, req).aggregate().thenApply {resp ->
+            if (resp.status().isRedirection()) {
+              return delegate.execute(ctx, HttpRequest.of(req.method(), resp.headers().get(HttpHeaderNames.LOCATION)))
+            }
+            return resp.toHttpResponse()
+          })
+        }
+      })
+      .build()
+  }
+
+  @Unroll
   def "Basic GET test #testName"() {
-    setup:
-    String url = "http://localhost:$port$urlPath"
-    def request = new Request.Builder().url(url).get().build()
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get(urlPath).aggregate().join()
 
     then:
-    response.code == 200
-    response.body().string() == expectedResponseBody
+    response.status().code() == 200
+    response.contentUtf8() == expectedResponseBody
     assertTraces(1) {
       trace(0, 2) {
         span(0) {
@@ -64,7 +80,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port$urlPath"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 200
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -111,16 +127,14 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
     "annotation API delayed response"    | "/foo-delayed"       | "/foo-delayed"         | "getFooDelayed" | new FooModel(3L, "delayed").toString()
   }
 
+  @Unroll
   def "GET test with async response #testName"() {
-    setup:
-    String url = "http://localhost:$port$urlPath"
-    def request = new Request.Builder().url(url).get().build()
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get(urlPath).aggregate().join()
 
     then:
-    response.code == 200
-    response.body().string() == expectedResponseBody
+    response.status().code() == 200
+    response.contentUtf8() == expectedResponseBody
     assertTraces(1) {
       trace(0, 3) {
         span(0) {
@@ -130,7 +144,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port$urlPath"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 200
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -164,7 +178,6 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
         span(2) {
           name "tracedMethod"
           childOf span(0)
-          errored false
           attributes {
           }
         }
@@ -198,17 +211,13 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
   merely wraps handler call into Mono and thus actual invocation of handler function happens later,
   when INTERNAL handler span has already finished. Thus, "tracedMethod" has SERVER Netty span as its parent.
    */
-
   def "Create span during handler function"() {
-    setup:
-    String url = "http://localhost:$port$urlPath"
-    def request = new Request.Builder().url(url).get().build()
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get(urlPath).aggregate().join()
 
     then:
-    response.code == 200
-    response.body().string() == expectedResponseBody
+    response.status().code() == 200
+    response.contentUtf8() == expectedResponseBody
     assertTraces(1) {
       trace(0, 3) {
         span(0) {
@@ -218,7 +227,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port$urlPath"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 200
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -252,7 +261,6 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
         span(2) {
           name "tracedMethod"
           childOf span(annotatedMethod ? 0 : 1)
-          errored false
           attributes {
           }
         }
@@ -266,26 +274,22 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
   }
 
   def "404 GET test"() {
-    setup:
-    String url = "http://localhost:$port/notfoundgreet"
-    def request = new Request.Builder().url(url).get().build()
-
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get("/notfoundgreet").aggregate().join()
 
     then:
-    response.code == 404
+    response.status().code() == 404
     assertTraces(1) {
       trace(0, 2) {
         span(0) {
           name "/**"
           kind SERVER
           hasNoParent()
-          errored true
+          status ERROR
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port/notfoundgreet"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 404
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -297,7 +301,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           name "ResourceWebHandler.handle"
           kind INTERNAL
           childOf span(0)
-          errored true
+          status ERROR
           errorEvent(ResponseStatusException, String)
           attributes {
             "spring-webflux.handler.type" "org.springframework.web.reactive.resource.ResourceWebHandler"
@@ -310,16 +314,12 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
   def "Basic POST test"() {
     setup:
     String echoString = "TEST"
-    String url = "http://localhost:$port/echo"
-    RequestBody body = RequestBody.create(PLAIN_TYPE, echoString)
-    def request = new Request.Builder().url(url).post(body).build()
-
     when:
-    def response = client.newCall(request).execute()
+    def response = client.post("/echo", echoString).aggregate().join()
 
     then:
-    response.code() == 202
-    response.body().string() == echoString
+    response.status().code() == 202
+    response.contentUtf8() == echoString
     assertTraces(1) {
       trace(0, 3) {
         span(0) {
@@ -329,7 +329,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port/echo"
             "${SemanticAttributes.HTTP_METHOD.key}" "POST"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 202
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -358,27 +358,24 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
     }
   }
 
+  @Unroll
   def "GET to bad endpoint #testName"() {
-    setup:
-    String url = "http://localhost:$port$urlPath"
-    def request = new Request.Builder().url(url).get().build()
-
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get(urlPath).aggregate().join()
 
     then:
-    response.code() == 500
+    response.status().code() == 500
     assertTraces(1) {
       trace(0, 2) {
         span(0) {
           name urlPathWithVariables
           kind SERVER
-          errored true
+          status ERROR
           hasNoParent()
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port$urlPath"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 500
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -396,8 +393,8 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           }
           kind INTERNAL
           childOf span(0)
-          errored true
-          errorEvent(RuntimeException, "bad things happen")
+          status ERROR
+          errorEvent(IllegalStateException, "bad things happen")
           attributes {
             if (annotatedMethod == null) {
               // Functional API
@@ -425,15 +422,13 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
 
   def "Redirect test"() {
     setup:
-    String url = "http://localhost:$port/double-greet-redirect"
     String finalUrl = "http://localhost:$port/double-greet"
-    def request = new Request.Builder().url(url).get().build()
 
     when:
-    def response = client.newCall(request).execute()
+    def response = client.get("/double-greet-redirect").aggregate().join()
 
     then:
-    response.code == 200
+    response.status().code() == 200
     assertTraces(2) {
       // TODO: why order of spans is different in these traces?
       trace(0, 2) {
@@ -444,7 +439,7 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
           attributes {
             "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
             "${SemanticAttributes.NET_PEER_PORT.key}" Long
-            "${SemanticAttributes.HTTP_URL.key}" url
+            "${SemanticAttributes.HTTP_URL.key}" "http://localhost:$port/double-greet-redirect"
             "${SemanticAttributes.HTTP_METHOD.key}" "GET"
             "${SemanticAttributes.HTTP_STATUS_CODE.key}" 307
             "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
@@ -496,17 +491,17 @@ class SpringWebfluxTest extends AgentInstrumentationSpecification {
     }
   }
 
+  @Unroll
   def "Multiple GETs to delaying route #testName"() {
     setup:
     def requestsCount = 50 // Should be more than 2x CPUs to fish out some bugs
-    String url = "http://localhost:$port$urlPath"
-    def request = new Request.Builder().url(url).get().build()
+    def url = "http://localhost:$port$urlPath"
     when:
-    def responses = (0..requestsCount - 1).collect { client.newCall(request).execute() }
+    def responses = (0..requestsCount - 1).collect { client.get(urlPath).aggregate().join() }
 
     then:
-    responses.every { it.code == 200 }
-    responses.every { it.body().string() == expectedResponseBody }
+    responses.every { it.status().code() == 200 }
+    responses.every { it.contentUtf8() == expectedResponseBody }
     assertTraces(responses.size()) {
       responses.eachWithIndex { def response, int i ->
         trace(i, 2) {

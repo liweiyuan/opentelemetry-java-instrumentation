@@ -10,32 +10,32 @@ import static net.bytebuddy.matcher.ElementMatchers.isPublic;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
 import com.linecorp.armeria.server.ServerBuilder;
-import io.opentelemetry.javaagent.tooling.TypeInstrumentation;
-import java.util.Collections;
-import java.util.Map;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
 import net.bytebuddy.asm.Advice;
-import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 
 public class ArmeriaServerBuilderInstrumentation implements TypeInstrumentation {
 
   @Override
-  public ElementMatcher<? super TypeDescription> typeMatcher() {
+  public ElementMatcher<TypeDescription> typeMatcher() {
     return named("com.linecorp.armeria.server.ServerBuilder");
   }
 
   @Override
-  public Map<? extends ElementMatcher<? super MethodDescription>, String> transformers() {
-    return Collections.singletonMap(
+  public void transform(TypeTransformer transformer) {
+    transformer.applyAdviceToMethod(
         isMethod().and(isPublic()).and(named("build")),
         ArmeriaServerBuilderInstrumentation.class.getName() + "$BuildAdvice");
   }
 
+  @SuppressWarnings("unused")
   public static class BuildAdvice {
+
     @Advice.OnMethodEnter
     public static void onEnter(@Advice.This ServerBuilder builder) {
-      builder.decorator(ArmeriaDecorators.SERVER_DECORATOR);
+      builder.decorator(ArmeriaSingletons.SERVER_DECORATOR);
     }
   }
 }

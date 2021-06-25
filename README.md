@@ -54,6 +54,11 @@ You can also configure the agent and exporter via command line arguments
 or environment variables. The net result is the ability to gather telemetry
 data from a Java application without code changes.
 
+This repository also publishes standalone instrumentation for several libraries (and growing)
+that can be used if you prefer that over using the Java agent.
+Please see [standalone library instrumentation](docs/standalone-library-instrumentation.md)
+if you are looking for documentation on using those.
+
 ## Getting Started
 
 Download the [latest version](https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent-all.jar).
@@ -74,20 +79,14 @@ configured to send data to
 at `http://localhost:4317`.
 
 Configuration parameters are passed as Java system properties (`-D` flags) or
-as environment variables. See below for a full list of environment variables. For example:
+as environment variables. See [the configuration documentation](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/docs/agent-config.md)
+for the full list of configuration items. For example:
 ```
 java -javaagent:path/to/opentelemetry-javaagent-all.jar \
+     -Dotel.resource.attributes=service.name=your-service-name \
      -Dotel.traces.exporter=zipkin \
      -jar myapp.jar
 ```
-
-Specify the external exporter JAR file using the `otel.exporter.jar` system property:
-```
-java -javaagent:path/to/opentelemetry-javaagent-all.jar \
-     -Dotel.exporter.jar=path/to/external-exporter.jar \
-     -jar myapp.jar
-```
-
 
 ## Configuring the Agent
 
@@ -103,7 +102,7 @@ behavior you find.*
 
 ## Supported libraries, frameworks, and application servers
 
-We support an impressively huge number of [libraries and frameworks](docs/supported-libraries.md#libraries---frameworks) and
+We support an impressively huge number of [libraries and frameworks](docs/supported-libraries.md#libraries--frameworks) and
 a majority of the most popular [application servers](docs/supported-libraries.md#application-servers)...right out of the box!
 [Click here to see the full list](docs/supported-libraries.md) and to learn more about
 [disabled instrumentation](docs/supported-libraries.md#disabled-instrumentations)
@@ -149,6 +148,7 @@ Triagers ([@open-telemetry/java-instrumentation-triagers](https://github.com/org
 Approvers ([@open-telemetry/java-instrumentation-approvers](https://github.com/orgs/open-telemetry/teams/java-instrumentation-approvers)):
 
 - [John Watson](https://github.com/jkwatson), Splunk
+- [Lauri Tulmin](https://github.com/laurit), Splunk
 - [Pavol Loffay](https://github.com/pavolloffay), Traceable.ai
 
 Maintainers ([@open-telemetry/java-instrumentation-maintainers](https://github.com/orgs/open-telemetry/teams/java-instrumentation-maintainers)):

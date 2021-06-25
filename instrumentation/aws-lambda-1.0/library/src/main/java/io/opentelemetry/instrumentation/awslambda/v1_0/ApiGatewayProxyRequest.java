@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import org.apache.commons.io.IOUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -31,11 +30,11 @@ abstract class ApiGatewayProxyRequest {
   private static boolean xrayPropagationFieldsOnly(Collection<String> fields) {
     // ugly but faster than typical convert-to-set-and-check-contains-only
     return (fields.size() == 1)
-        && (ParentContextExtractor.AWS_TRACE_HEADER_PROPAGATOR_KEY.equalsIgnoreCase(
-            fields.iterator().next()));
+        && ParentContextExtractor.AWS_TRACE_HEADER_PROPAGATOR_KEY.equalsIgnoreCase(
+            fields.iterator().next());
   }
 
-  static ApiGatewayProxyRequest forStream(final InputStream source) throws IOException {
+  static ApiGatewayProxyRequest forStream(InputStream source) throws IOException {
 
     if (noHttpPropagationNeeded()) {
       return new NoopRequest(source);
@@ -46,10 +45,6 @@ abstract class ApiGatewayProxyRequest {
     }
     // fallback
     return new CopiedApiGatewayProxyRequest(source);
-  }
-
-  private static boolean nullOrEmpty(List<String> values) {
-    return ((values == null) || values.isEmpty());
   }
 
   @Nullable

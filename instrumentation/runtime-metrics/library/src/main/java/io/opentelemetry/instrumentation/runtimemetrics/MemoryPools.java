@@ -6,8 +6,7 @@
 package io.opentelemetry.instrumentation.runtimemetrics;
 
 import io.opentelemetry.api.metrics.AsynchronousInstrument.LongResult;
-import io.opentelemetry.api.metrics.GlobalMetricsProvider;
-import io.opentelemetry.api.metrics.LongUpDownSumObserver;
+import io.opentelemetry.api.metrics.GlobalMeterProvider;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.common.Labels;
 import java.lang.management.ManagementFactory;
@@ -30,7 +29,7 @@ import java.util.List;
  *
  * <pre>
  *   runtime.jvm.memory.area{type="used",area="heap"} 2000000
- *   runtime.jvm.memory.area{type="committed",area="nonheap"} 200000
+ *   runtime.jvm.memory.area{type="committed",area="non_heap"} 200000
  *   runtime.jvm.memory.area{type="used",pool="PS Eden Space"} 2000
  * </pre>
  */
@@ -59,24 +58,23 @@ public final class MemoryPools {
   /** Register only the "area" observers. */
   public static void registerMemoryAreaObservers() {
     MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
-    Meter meter = GlobalMetricsProvider.getMeter(MemoryPools.class.getName());
-    final LongUpDownSumObserver areaMetric =
-        meter
-            .longUpDownSumObserverBuilder("runtime.jvm.memory.area")
-            .setDescription("Bytes of a given JVM memory area.")
-            .setUnit("By")
-            .setUpdater(
-                resultLongObserver -> {
-                  observeHeap(resultLongObserver, memoryBean.getHeapMemoryUsage());
-                  observeNonHeap(resultLongObserver, memoryBean.getNonHeapMemoryUsage());
-                })
-            .build();
+    Meter meter = GlobalMeterProvider.getMeter(MemoryPools.class.getName());
+    meter
+        .longUpDownSumObserverBuilder("runtime.jvm.memory.area")
+        .setDescription("Bytes of a given JVM memory area.")
+        .setUnit("By")
+        .setUpdater(
+            resultLongObserver -> {
+              observeHeap(resultLongObserver, memoryBean.getHeapMemoryUsage());
+              observeNonHeap(resultLongObserver, memoryBean.getNonHeapMemoryUsage());
+            })
+        .build();
   }
 
   /** Register only the "pool" observers. */
   public static void registerMemoryPoolObservers() {
     List<MemoryPoolMXBean> poolBeans = ManagementFactory.getMemoryPoolMXBeans();
-    Meter meter = GlobalMetricsProvider.getMeter(MemoryPools.class.getName());
+    Meter meter = GlobalMeterProvider.getMeter(MemoryPools.class.getName());
     List<Labels> usedLabelSets = new ArrayList<>(poolBeans.size());
     List<Labels> committedLabelSets = new ArrayList<>(poolBeans.size());
     List<Labels> maxLabelSets = new ArrayList<>(poolBeans.size());

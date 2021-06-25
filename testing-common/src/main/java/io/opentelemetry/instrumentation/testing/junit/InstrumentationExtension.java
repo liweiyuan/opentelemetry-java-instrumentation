@@ -5,6 +5,8 @@
 
 package io.opentelemetry.instrumentation.testing.junit;
 
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.context.ContextStorage;
 import io.opentelemetry.instrumentation.testing.InstrumentationTestRunner;
 import io.opentelemetry.instrumentation.testing.util.TelemetryDataUtil;
 import io.opentelemetry.sdk.metrics.data.MetricData;
@@ -13,12 +15,13 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.extension.AfterAllCallback;
+import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
 public abstract class InstrumentationExtension
-    implements BeforeAllCallback, BeforeEachCallback, AfterAllCallback {
+    implements BeforeAllCallback, BeforeEachCallback, AfterAllCallback, AfterEachCallback {
   private static final long DEFAULT_TRACE_WAIT_TIMEOUT_SECONDS = 20;
 
   private final InstrumentationTestRunner testRunner;
@@ -38,8 +41,21 @@ public abstract class InstrumentationExtension
   }
 
   @Override
+  public void afterEach(ExtensionContext context) throws Exception {
+    ContextStorage storage = ContextStorage.get();
+    if (storage instanceof AutoCloseable) {
+      ((AutoCloseable) storage).close();
+    }
+  }
+
+  @Override
   public void afterAll(ExtensionContext extensionContext) {
-    testRunner.beforeTestClass();
+    testRunner.afterTestClass();
+  }
+
+  /** Return the {@link OpenTelemetry} instance used to produce telemetry data. */
+  public OpenTelemetry getOpenTelemetry() {
+    return testRunner.getOpenTelemetry();
   }
 
   /** Return a list of all captured spans. */

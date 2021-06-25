@@ -4,7 +4,6 @@ import static io.opentelemetry.sdk.testing.assertj.TracesAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.opentelemetry.api.trace.SpanKind;
-import io.opentelemetry.instrumentation.test.utils.OkHttpUtils;
 import io.opentelemetry.instrumentation.test.utils.PortUtils;
 import io.opentelemetry.instrumentation.testing.junit.AgentInstrumentationExtension;
 import java.io.IOException;
@@ -31,14 +30,14 @@ class DemoServlet3InstrumentationTest {
   static final AgentInstrumentationExtension instrumentation = AgentInstrumentationExtension
       .create();
 
-  static final OkHttpClient httpClient = OkHttpUtils.client();
+  static final OkHttpClient httpClient = new OkHttpClient();
 
   static int port;
   static Server server;
 
   @BeforeAll
   static void startServer() throws Exception {
-    port = PortUtils.randomOpenPort();
+    port = PortUtils.findOpenPort();
     server = new Server(port);
     for (var connector : server.getConnectors()) {
       connector.setHost("localhost");

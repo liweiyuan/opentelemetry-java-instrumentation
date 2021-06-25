@@ -7,9 +7,11 @@ package server
 
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.INDEXED_CHILD
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.QUERY_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.SUCCESS
+import static play.mvc.Http.Context.Implicit.request
 
 import java.util.concurrent.CompletableFuture
 import java.util.function.Supplier
@@ -27,6 +29,14 @@ class PlayAsyncServerTest extends PlayServerTest {
         CompletableFuture.supplyAsync({
           controller(SUCCESS) {
             Results.status(SUCCESS.getStatus(), SUCCESS.getBody())
+          }
+        }, HttpExecution.defaultContext())
+      } as Supplier)
+        .GET(INDEXED_CHILD.getPath()).routeTo({
+        CompletableFuture.supplyAsync({
+          controller(INDEXED_CHILD) {
+            INDEXED_CHILD.collectSpanAttributes { request().getQueryString(it) }
+            Results.status(INDEXED_CHILD.getStatus())
           }
         }, HttpExecution.defaultContext())
       } as Supplier)

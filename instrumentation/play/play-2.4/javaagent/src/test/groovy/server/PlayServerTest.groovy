@@ -8,10 +8,13 @@ package server
 import static io.opentelemetry.api.trace.SpanKind.INTERNAL
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.INDEXED_CHILD
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.QUERY_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.SUCCESS
+import static play.mvc.Http.Context.Implicit.request
 
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.instrumentation.test.AgentTestTrait
 import io.opentelemetry.instrumentation.test.asserts.TraceAssert
 import io.opentelemetry.instrumentation.test.base.HttpServerTest
@@ -29,6 +32,12 @@ class PlayServerTest extends HttpServerTest<Server> implements AgentTestTrait {
         .GET(SUCCESS.getPath()).routeTo({
         controller(SUCCESS) {
           Results.status(SUCCESS.getStatus(), SUCCESS.getBody())
+        }
+      } as Supplier)
+        .GET(INDEXED_CHILD.getPath()).routeTo({
+        controller(INDEXED_CHILD) {
+          INDEXED_CHILD.collectSpanAttributes { request().getQueryString(it) }
+          Results.status(INDEXED_CHILD.getStatus())
         }
       } as Supplier)
         .GET(QUERY_PARAM.getPath()).routeTo({
@@ -61,8 +70,13 @@ class PlayServerTest extends HttpServerTest<Server> implements AgentTestTrait {
   }
 
   @Override
-  boolean hasHandlerSpan() {
+  boolean hasHandlerSpan(ServerEndpoint endpoint) {
     true
+  }
+
+  @Override
+  boolean testConcurrency() {
+    return true
   }
 
   @Override
@@ -70,8 +84,8 @@ class PlayServerTest extends HttpServerTest<Server> implements AgentTestTrait {
     trace.span(index) {
       name "play.request"
       kind INTERNAL
-      errored endpoint == EXCEPTION
       if (endpoint == EXCEPTION) {
+        status StatusCode.ERROR
         errorEvent(Exception, EXCEPTION.body)
       }
       childOf((SpanData) parent)
@@ -82,5 +96,4 @@ class PlayServerTest extends HttpServerTest<Server> implements AgentTestTrait {
   String expectedServerSpanName(ServerEndpoint endpoint) {
     return "HTTP GET"
   }
-
 }

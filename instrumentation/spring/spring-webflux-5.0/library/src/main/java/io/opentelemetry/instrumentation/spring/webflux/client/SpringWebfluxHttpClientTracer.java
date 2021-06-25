@@ -7,12 +7,13 @@ package io.opentelemetry.instrumentation.spring.webflux.client;
 
 import static io.opentelemetry.instrumentation.spring.webflux.client.HttpHeadersInjectAdapter.SETTER;
 
+import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
 import io.opentelemetry.instrumentation.api.config.Config;
 import io.opentelemetry.instrumentation.api.tracer.HttpClientTracer;
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -21,18 +22,21 @@ import java.util.List;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 
-public class SpringWebfluxHttpClientTracer
+class SpringWebfluxHttpClientTracer
     extends HttpClientTracer<ClientRequest, ClientRequest.Builder, ClientResponse> {
 
-  private static final SpringWebfluxHttpClientTracer TRACER = new SpringWebfluxHttpClientTracer();
+  private static final boolean CAPTURE_EXPERIMENTAL_SPAN_ATTRIBUTES =
+      Config.get()
+          .getBooleanProperty(
+              "otel.instrumentation.spring-webflux.experimental-span-attributes", false);
 
-  public static SpringWebfluxHttpClientTracer tracer() {
-    return TRACER;
+  SpringWebfluxHttpClientTracer(OpenTelemetry openTelemetry) {
+    super(openTelemetry, new NetPeerAttributes());
   }
 
   private static final MethodHandle RAW_STATUS_CODE = findRawStatusCode();
 
-  public void onCancel(Context context) {
+  void onCancel(Context context) {
     if (captureExperimentalSpanAttributes()) {
       Span span = Span.fromContext(context);
       span.setAttribute("spring-webflux.event", "cancelled");
@@ -57,6 +61,7 @@ public class SpringWebfluxHttpClientTracer
       try {
         return (int) RAW_STATUS_CODE.invokeExact(httpResponse);
       } catch (Throwable ignored) {
+        // Ignore
       }
     }
     // prior to webflux 5.1, the best we can get is HttpStatus enum, which only covers standard
@@ -85,10 +90,6 @@ public class SpringWebfluxHttpClientTracer
     return "io.opentelemetry.javaagent.spring-webflux-5.0";
   }
 
-  public Tracer getTracer() {
-    return tracer;
-  }
-
   // rawStatusCode() method was introduced in webflux 5.1
   // prior to this method, the best we can get is HttpStatus enum, which only covers standard status
   // codes (see usage above)
@@ -101,11 +102,7 @@ public class SpringWebfluxHttpClientTracer
     }
   }
 
-  // TODO cache this after
-  //  https://github.com/open-telemetry/opentelemetry-java-instrumentation/pull/1643
   private static boolean captureExperimentalSpanAttributes() {
-    return Config.get()
-        .getBooleanProperty(
-            "otel.instrumentation.spring-webflux.experimental-span-attributes", false);
+    return CAPTURE_EXPERIMENTAL_SPAN_ATTRIBUTES;
   }
 }

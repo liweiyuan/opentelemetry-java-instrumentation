@@ -1,8 +1,7 @@
 plugins {
   id "org.unbroken-dome.xjc" version "2.0.0"
+  id("otel.java-conventions")
 }
-
-apply from: "$rootDir/gradle/java.gradle"
 
 checkstyle {
   // exclude generated web service classes
@@ -10,12 +9,15 @@ checkstyle {
 }
 
 dependencies {
-  api group: 'javax.xml.ws', name: 'jaxws-api', version: '2.0'
-  api group: 'javax.jws', name: 'javax.jws-api', version: '1.1'
+  api "javax.xml.ws:jaxws-api:2.0"
+  api "javax.jws:javax.jws-api:1.1"
 
-  api deps.testLogging
-  api group: 'org.eclipse.jetty', name: 'jetty-webapp', version: '9.4.35.v20201120'
-  api group: 'org.springframework.ws', name: 'spring-ws-core', version: '3.0.0.RELEASE'
+  api "ch.qos.logback:logback-classic"
+  api "org.slf4j:log4j-over-slf4j"
+  api "org.slf4j:jcl-over-slf4j"
+  api "org.slf4j:jul-to-slf4j"
+  api "org.eclipse.jetty:jetty-webapp:9.4.35.v20201120"
+  api "org.springframework.ws:spring-ws-core:3.0.0.RELEASE"
 
   implementation(project(':testing-common'))
 }

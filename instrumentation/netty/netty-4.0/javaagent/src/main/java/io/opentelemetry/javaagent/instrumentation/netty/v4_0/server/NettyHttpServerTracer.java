@@ -13,6 +13,7 @@ import io.netty.handler.codec.http.HttpResponse;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.instrumentation.api.tracer.HttpServerTracer;
+import io.opentelemetry.javaagent.instrumentation.netty.common.server.NettyRequestExtractAdapter;
 import io.opentelemetry.javaagent.instrumentation.netty.v4_0.AttributeKeys;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -71,7 +72,7 @@ public class NettyHttpServerTracer
   }
 
   @Override
-  protected String peerHostIP(Channel channel) {
+  protected String peerHostIp(Channel channel) {
     SocketAddress socketAddress = channel.remoteAddress();
     if (socketAddress instanceof InetSocketAddress) {
       return ((InetSocketAddress) socketAddress).getAddress().getHostAddress();

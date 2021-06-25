@@ -5,6 +5,7 @@
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
 import static io.opentelemetry.api.trace.SpanKind.INTERNAL
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderTrace
 
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
@@ -286,7 +287,7 @@ class SessionTest extends AbstractHibernateTest {
           name "Session.replicate"
           kind INTERNAL
           childOf span(0)
-          errored(true)
+          status ERROR
           errorEvent(MappingException, "Unknown entity: java.lang.Long")
         }
         span(2) {
@@ -439,10 +440,10 @@ class SessionTest extends AbstractHibernateTest {
     }
 
     where:
-    queryMethodName  | expectedSpanName      | queryBuildMethod
-    "createQuery"    | "from Value"          | { sess -> sess.createQuery("from Value") }
-    "getNamedQuery"  | "from Value"          | { sess -> sess.getNamedQuery("TestNamedQuery") }
-    "createSQLQuery" | "SELECT * FROM Value" | { sess -> sess.createSQLQuery("SELECT * FROM Value") }
+    queryMethodName  | expectedSpanName | queryBuildMethod
+    "createQuery"    | "SELECT Value"   | { sess -> sess.createQuery("from Value") }
+    "getNamedQuery"  | "SELECT Value"   | { sess -> sess.getNamedQuery("TestNamedQuery") }
+    "createSQLQuery" | "SELECT Value"   | { sess -> sess.createSQLQuery("SELECT * FROM Value") }
   }
 
 

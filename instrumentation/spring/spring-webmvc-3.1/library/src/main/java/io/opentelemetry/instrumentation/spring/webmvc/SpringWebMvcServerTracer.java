@@ -5,11 +5,11 @@
 
 package io.opentelemetry.instrumentation.spring.webmvc;
 
-import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.instrumentation.api.tracer.HttpServerTracer;
-import io.opentelemetry.instrumentation.servlet.HttpServletRequestGetter;
+import io.opentelemetry.instrumentation.servlet.javax.JavaxHttpServletRequestGetter;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -17,8 +17,8 @@ class SpringWebMvcServerTracer
     extends HttpServerTracer<
         HttpServletRequest, HttpServletResponse, HttpServletRequest, HttpServletRequest> {
 
-  public SpringWebMvcServerTracer(Tracer tracer) {
-    super(tracer);
+  SpringWebMvcServerTracer(OpenTelemetry openTelemetry) {
+    super(openTelemetry);
   }
 
   @Override
@@ -27,13 +27,13 @@ class SpringWebMvcServerTracer
   }
 
   @Override
-  protected String peerHostIP(HttpServletRequest request) {
+  protected String peerHostIp(HttpServletRequest request) {
     return request.getRemoteAddr();
   }
 
   @Override
   protected TextMapGetter<HttpServletRequest> getGetter() {
-    return HttpServletRequestGetter.GETTER;
+    return JavaxHttpServletRequestGetter.GETTER;
   }
 
   @Override
@@ -74,6 +74,6 @@ class SpringWebMvcServerTracer
 
   @Override
   protected String getInstrumentationName() {
-    return "io.opentelemetry.javaagent.spring-webmvc-3.1";
+    return "io.opentelemetry.spring-webmvc-3.1";
   }
 }

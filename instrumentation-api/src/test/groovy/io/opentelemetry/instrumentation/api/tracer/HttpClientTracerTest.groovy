@@ -5,24 +5,15 @@
 
 package io.opentelemetry.instrumentation.api.tracer
 
-import io.opentelemetry.api.trace.Span
+import static io.opentelemetry.semconv.trace.attributes.SemanticAttributes.NetTransportValues.IP_TCP
+
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.context.propagation.TextMapSetter
-import io.opentelemetry.instrumentation.api.config.Config
-import io.opentelemetry.instrumentation.api.config.ConfigBuilder
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
 import spock.lang.Shared
 
 class HttpClientTracerTest extends BaseTracerTest {
-
-  def setupSpec() {
-    Config.INSTANCE = new ConfigBuilder().readProperties([
-      "otel.instrumentation.common.peer-service-mapping": "1.2.3.4=catservice,dogs.com=dogsservice"
-    ]).build()
-  }
-
-  def cleanupSpec() {
-    Config.INSTANCE = null
-  }
 
   @Shared
   def testUrl = new URI("http://myhost:123/somepath")
@@ -42,7 +33,7 @@ class HttpClientTracerTest extends BaseTracerTest {
 
     then:
     if (req) {
-      1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, "IP.TCP")
+      1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, IP_TCP)
       1 * span.setAttribute(SemanticAttributes.HTTP_METHOD, req.method)
       1 * span.setAttribute(SemanticAttributes.HTTP_URL, "$req.url")
       1 * span.setAttribute(SemanticAttributes.NET_PEER_NAME, req.url.host)
@@ -69,7 +60,7 @@ class HttpClientTracerTest extends BaseTracerTest {
 
     then:
     if (req) {
-      1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, "IP.TCP")
+      1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, IP_TCP)
       1 * span.setAttribute(SemanticAttributes.HTTP_METHOD, req.method)
       1 * span.setAttribute(SemanticAttributes.HTTP_URL, "$req.url")
       1 * span.setAttribute(SemanticAttributes.NET_PEER_NAME, req.url.host)
@@ -89,7 +80,7 @@ class HttpClientTracerTest extends BaseTracerTest {
     tracer.onRequest(span, req)
 
     then:
-    1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, "IP.TCP")
+    1 * span.setAttribute(SemanticAttributes.NET_TRANSPORT, IP_TCP)
     if (expectedUrl != null) {
       1 * span.setAttribute(SemanticAttributes.HTTP_URL, expectedUrl)
     }
@@ -112,6 +103,7 @@ class HttpClientTracerTest extends BaseTracerTest {
     false          | "https://host:0"                     | "https://host:0"                     | ""            | null             | "host"   | null
     false          | "https://host/path"                  | "https://host/path"                  | ""            | null             | "host"   | null
     false          | "http://host:99/path?query#fragment" | "http://host:99/path?query#fragment" | ""            | null             | "host"   | 99
+    false          | "https://usr:pswd@host/path"         | "https://host/path"                  | ""            | null             | "host"   | null
 
     req = [url: url == null ? null : new URI(url)]
   }
@@ -119,6 +111,7 @@ class HttpClientTracerTest extends BaseTracerTest {
   def "test onResponse"() {
     setup:
     def tracer = newTracer()
+    def statusCode = status != null ? HttpStatusConverter.statusFromHttpStatus(status) : null
 
     when:
     tracer.onResponse(span, resp)
@@ -126,7 +119,9 @@ class HttpClientTracerTest extends BaseTracerTest {
     then:
     if (status) {
       1 * span.setAttribute(SemanticAttributes.HTTP_STATUS_CODE, status)
-      1 * span.setStatus(HttpStatusConverter.statusFromHttpStatus(status))
+    }
+    if (statusCode != null && statusCode != StatusCode.UNSET) {
+      1 * span.setStatus(statusCode)
     }
     0 * _
 
@@ -143,26 +138,12 @@ class HttpClientTracerTest extends BaseTracerTest {
     null   | null
   }
 
-  def "test assert null span"() {
-    setup:
-    def tracer = newTracer()
-
-    when:
-    tracer.onRequest((Span) null, null)
-
-    then:
-    thrown(AssertionError)
-
-    when:
-    tracer.onResponse((Span) null, null)
-
-    then:
-    thrown(AssertionError)
-  }
-
   @Override
   def newTracer() {
-    return new HttpClientTracer<Map, Map, Map>() {
+    def netPeerAttributes = new NetPeerAttributes([
+      "1.2.3.4": "catservice", "dogs.com": "dogsservice"
+    ])
+    return new HttpClientTracer<Map, Map, Map>(netPeerAttributes) {
 
       @Override
       protected String method(Map m) {

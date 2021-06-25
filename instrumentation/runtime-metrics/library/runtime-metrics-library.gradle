@@ -1,9 +1,11 @@
-apply from: "$rootDir/gradle/instrumentation-library.gradle"
+plugins {
+  id("otel.library-instrumentation")
+}
 
 dependencies {
-  implementation deps.opentelemetryApiMetrics
+  implementation "io.opentelemetry:opentelemetry-api-metrics"
 
-  testImplementation deps.opentelemetrySdkMetrics
+  testImplementation "io.opentelemetry:opentelemetry-sdk-metrics"
   testImplementation project(':testing-common')
-  testImplementation group: 'org.mockito', name: 'mockito-core', version: '3.6.0'
+  testImplementation "org.mockito:mockito-core"
 }

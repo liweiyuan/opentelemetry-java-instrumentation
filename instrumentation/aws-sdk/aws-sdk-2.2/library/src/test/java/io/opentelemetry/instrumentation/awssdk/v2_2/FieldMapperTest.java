@@ -8,9 +8,9 @@ package io.opentelemetry.instrumentation.awssdk.v2_2;
 import static io.opentelemetry.instrumentation.awssdk.v2_2.AwsSdkRequest.BatchWriteItem;
 import static io.opentelemetry.instrumentation.awssdk.v2_2.AwsSdkRequest.UpdateTable;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.mock;
-import static org.mockito.BDDMockito.verify;
-import static org.mockito.BDDMockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import io.opentelemetry.api.trace.Span;
 import java.util.Collection;
@@ -35,7 +35,6 @@ public class FieldMapperTest {
     MethodHandleFactory methodHandleFactory = new MethodHandleFactory();
     Serializer serializer = mock(Serializer.class);
     FieldMapper underTest = new FieldMapper(serializer, methodHandleFactory);
-    Map<String, Collection<WriteRequest>> items = new HashMap();
     UpdateTableRequest sdkRequest =
         UpdateTableRequest.builder()
             .provisionedThroughput(

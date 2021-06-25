@@ -10,6 +10,8 @@ import application.io.opentelemetry.api.metrics.DoubleValueObserverBuilder;
 import application.io.opentelemetry.api.metrics.common.Labels;
 import java.util.function.Consumer;
 
+// For observers, which have no API, there might be a better pattern than wrapping.
+@SuppressWarnings("FieldCanBeLocal")
 class ApplicationDoubleValueObserver implements DoubleValueObserver {
 
   private final io.opentelemetry.api.metrics.DoubleValueObserver agentDoubleValueObserver;
@@ -20,7 +22,7 @@ class ApplicationDoubleValueObserver implements DoubleValueObserver {
   }
 
   static class AgentResultDoubleValueObserver
-      implements Consumer<io.opentelemetry.api.metrics.DoubleValueObserver.DoubleResult> {
+      implements Consumer<io.opentelemetry.api.metrics.AsynchronousInstrument.DoubleResult> {
 
     private final Consumer<DoubleResult> metricUpdater;
 
@@ -29,18 +31,18 @@ class ApplicationDoubleValueObserver implements DoubleValueObserver {
     }
 
     @Override
-    public void accept(io.opentelemetry.api.metrics.DoubleValueObserver.DoubleResult result) {
+    public void accept(io.opentelemetry.api.metrics.AsynchronousInstrument.DoubleResult result) {
       metricUpdater.accept(new ApplicationResultDoubleValueObserver(result));
     }
   }
 
   static class ApplicationResultDoubleValueObserver implements DoubleResult {
 
-    private final io.opentelemetry.api.metrics.DoubleValueObserver.DoubleResult
+    private final io.opentelemetry.api.metrics.AsynchronousInstrument.DoubleResult
         agentResultDoubleValueObserver;
 
     public ApplicationResultDoubleValueObserver(
-        io.opentelemetry.api.metrics.DoubleValueObserver.DoubleResult
+        io.opentelemetry.api.metrics.AsynchronousInstrument.DoubleResult
             agentResultDoubleValueObserver) {
       this.agentResultDoubleValueObserver = agentResultDoubleValueObserver;
     }

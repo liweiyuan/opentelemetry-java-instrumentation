@@ -12,9 +12,12 @@ import io.opentelemetry.semconv.trace.attributes.SemanticAttributes.DbSystemValu
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.regex.Matcher;
@@ -141,7 +144,6 @@ public enum JdbcConnectionUrlParser {
 
     @Override
     DbInfo.Builder doParse(String jdbcUrl, DbInfo.Builder builder) {
-      String type;
       String serverName = "";
       Integer port = null;
       String name = null;
@@ -152,7 +154,7 @@ public enum JdbcConnectionUrlParser {
         return builder;
       }
 
-      type = jdbcUrl.substring(0, hostIndex);
+      String type = jdbcUrl.substring(0, hostIndex);
 
       String[] split;
       if (type.equals("db2") || type.equals("as400")) {
@@ -777,9 +779,8 @@ public enum JdbcConnectionUrlParser {
         }
       } else {
         builder.subtype("directory").host(null).port(null);
-        String urlInstance = details;
-        if (!urlInstance.isEmpty()) {
-          instance = urlInstance;
+        if (!details.isEmpty()) {
+          instance = details;
         }
       }
 
@@ -802,10 +803,12 @@ public enum JdbcConnectionUrlParser {
     }
   }
 
-  private final String[] typeKeys;
+  // Wrapped in unmodifiableList
+  @SuppressWarnings("ImmutableEnumChecker")
+  private final List<String> typeKeys;
 
   JdbcConnectionUrlParser(String... typeKeys) {
-    this.typeKeys = typeKeys;
+    this.typeKeys = Collections.unmodifiableList(Arrays.asList(typeKeys));
   }
 
   abstract DbInfo.Builder doParse(String jdbcUrl, DbInfo.Builder builder);
@@ -815,7 +818,7 @@ public enum JdbcConnectionUrlParser {
       return DEFAULT;
     }
     // Make this easier and ignore case.
-    connectionUrl = connectionUrl.toLowerCase();
+    connectionUrl = connectionUrl.toLowerCase(Locale.ROOT);
 
     if (!connectionUrl.startsWith("jdbc:")) {
       return DEFAULT;
@@ -840,7 +843,7 @@ public enum JdbcConnectionUrlParser {
         return withUrl(typeParsers.get(type).doParse(jdbcUrl, parsedProps), type);
       }
       return withUrl(GENERIC_URL_LIKE.doParse(jdbcUrl, parsedProps), type);
-    } catch (Exception e) {
+    } catch (RuntimeException e) {
       log.debug("Error parsing URL", e);
       return parsedProps.build();
     }
@@ -894,8 +897,7 @@ public enum JdbcConnectionUrlParser {
     return queryPairs;
   }
 
-  private static void populateStandardProperties(
-      DbInfo.Builder builder, Map<? extends Object, ? extends Object> props) {
+  private static void populateStandardProperties(DbInfo.Builder builder, Map<?, ?> props) {
     if (props != null && !props.isEmpty()) {
       if (props.containsKey("user")) {
         builder.user((String) props.get("user"));

@@ -1,40 +1,22 @@
 plugins {
-  id 'org.xbib.gradle.plugin.jflex' version '1.5.0'
+  id("otel.java-conventions")
+  id("otel.jacoco-conventions")
+  id("otel.publish-conventions")
 }
 
 group = 'io.opentelemetry.javaagent'
 
-apply from: "$rootDir/gradle/java.gradle"
-apply from: "$rootDir/gradle/publish.gradle"
-
-project.ext.minimumBranchCoverage = 0.0
-project.ext.minimumInstructionCoverage = 0.0
-
-def jflexTargetDir = file"${project.buildDir}/generated/jflex/sql"
-def jflexTask = tasks.create("sqlSanitizerJflex", org.xbib.gradle.plugin.JFlexTask) {
-  group = 'jflex'
-  description = 'Generate SqlSanitizer'
-  source = [file("${project.projectDir}/src/main/jflex/SqlSanitizer.flex")]
-  target = jflexTargetDir
-}
-tasks.compileJava.dependsOn(jflexTask)
-sourceSets.main.java.srcDirs += jflexTargetDir
 
 dependencies {
-  api deps.opentelemetryApi
-  compileOnly deps.opentelemetrySdk
-  implementation deps.slf4j
+  api "io.opentelemetry:opentelemetry-api"
+  compileOnly "io.opentelemetry:opentelemetry-sdk"
+  implementation "org.slf4j:slf4j-api"
   implementation project(':instrumentation-api')
+  compileOnly "com.google.auto.value:auto-value-annotations"
+  annotationProcessor "com.google.auto.value:auto-value"
 
   testImplementation project(':testing-common')
-  testImplementation group: 'org.mockito', name: 'mockito-core', version: '3.6.0'
-  testImplementation deps.assertj
-}
-
-sourcesJar {
-  /*
-  We have two javacc config above. They both generate some overlapping files, e.g. ParseException.java.
-  As they both add generated files to sources, this results in duplicating files.
-   */
-  duplicatesStrategy = DuplicatesStrategy.INCLUDE
+  testImplementation "org.mockito:mockito-core"
+  testImplementation "org.mockito:mockito-junit-jupiter"
+  testImplementation "org.assertj:assertj-core"
 }

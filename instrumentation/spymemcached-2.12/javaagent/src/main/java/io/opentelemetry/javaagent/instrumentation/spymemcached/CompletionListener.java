@@ -28,7 +28,7 @@ public abstract class CompletionListener<T> {
 
   private final Context context;
 
-  public CompletionListener(
+  protected CompletionListener(
       Context parentContext, MemcachedConnection connection, String methodName) {
     context = tracer().startSpan(parentContext, connection, methodName);
   }
@@ -55,9 +55,9 @@ public abstract class CompletionListener<T> {
       // Avoid swallowing InterruptedException
       tracer().endExceptionally(context, e);
       Thread.currentThread().interrupt();
-    } catch (Exception e) {
+    } catch (Throwable t) {
       // This should never happen, just in case to make sure we cover all unexpected exceptions
-      tracer().endExceptionally(context, e);
+      tracer().endExceptionally(context, t);
     } finally {
       tracer().end(context);
     }

@@ -6,9 +6,11 @@
 package io.opentelemetry.instrumentation.testing;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.ContextPropagators;
+import io.opentelemetry.exporter.logging.LoggingSpanExporter;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.common.CompletableResultCode;
 import io.opentelemetry.sdk.metrics.data.MetricData;
@@ -42,6 +44,7 @@ public final class LibraryTestRunner implements InstrumentationTestRunner {
             .setTracerProvider(
                 SdkTracerProvider.builder()
                     .addSpanProcessor(new FlushTrackingSpanProcessor())
+                    .addSpanProcessor(SimpleSpanProcessor.create(new LoggingSpanExporter()))
                     .addSpanProcessor(SimpleSpanProcessor.create(testExporter))
                     .build())
             .setPropagators(ContextPropagators.create(W3CTraceContextPropagator.getInstance()))
@@ -71,6 +74,15 @@ public final class LibraryTestRunner implements InstrumentationTestRunner {
   }
 
   @Override
+  public OpenTelemetry getOpenTelemetry() {
+    return openTelemetry;
+  }
+
+  public OpenTelemetrySdk getOpenTelemetrySdk() {
+    return openTelemetry;
+  }
+
+  @Override
   public List<SpanData> getExportedSpans() {
     return testExporter.getFinishedSpanItems();
   }
@@ -79,10 +91,6 @@ public final class LibraryTestRunner implements InstrumentationTestRunner {
   public List<MetricData> getExportedMetrics() {
     // no metrics support yet
     return Collections.emptyList();
-  }
-
-  public OpenTelemetrySdk getOpenTelemetrySdk() {
-    return openTelemetry;
   }
 
   @Override

@@ -4,6 +4,7 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 
 import io.lettuce.core.ClientOptions
 import io.lettuce.core.ConnectionFuture
@@ -15,18 +16,18 @@ import io.lettuce.core.api.async.RedisAsyncCommands
 import io.lettuce.core.api.sync.RedisCommands
 import io.lettuce.core.codec.StringCodec
 import io.lettuce.core.protocol.AsyncCommand
+import io.netty.channel.AbstractChannel
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
 import io.opentelemetry.instrumentation.test.utils.PortUtils
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
 import java.util.concurrent.CancellationException
-import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.function.BiConsumer
 import java.util.function.BiFunction
 import java.util.function.Consumer
 import java.util.function.Function
-import redis.embedded.RedisServer
+import org.testcontainers.containers.FixedHostPortGenericContainer
 import spock.lang.Shared
 import spock.util.concurrent.AsyncConditions
 
@@ -36,6 +37,8 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
   public static final int DB_INDEX = 0
   // Disable autoreconnect so we do not get stray traces popping up on server shutdown
   public static final ClientOptions CLIENT_OPTIONS = ClientOptions.builder().autoReconnect(false).build()
+
+  private static FixedHostPortGenericContainer redisServer = new FixedHostPortGenericContainer<>("redis:6.2.3-alpine")
 
   @Shared
   int port
@@ -51,9 +54,6 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
   String embeddedDbUri
 
   @Shared
-  RedisServer redisServer
-
-  @Shared
   Map<String, String> testHashMap = [
     firstname: "John",
     lastname : "Doe",
@@ -66,25 +66,19 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
   RedisCommands<String, ?> syncCommands
 
   def setupSpec() {
-    port = PortUtils.randomOpenPort()
-    incorrectPort = PortUtils.randomOpenPort()
+    port = PortUtils.findOpenPort()
+    incorrectPort = PortUtils.findOpenPort()
     dbAddr = PEER_NAME + ":" + port + "/" + DB_INDEX
     dbAddrNonExistent = PEER_NAME + ":" + incorrectPort + "/" + DB_INDEX
     dbUriNonExistent = "redis://" + dbAddrNonExistent
     embeddedDbUri = "redis://" + dbAddr
 
-    redisServer = RedisServer.builder()
-    // bind to localhost to avoid firewall popup
-      .setting("bind " + PEER_NAME)
-    // set max memory to avoid problems in CI
-      .setting("maxmemory 128M")
-      .port(port).build()
+    redisServer = redisServer.withFixedExposedPort(port, 6379)
   }
 
   def setup() {
     redisClient = RedisClient.create(embeddedDbUri)
 
-    println "Using redis: $redisServer.args"
     redisServer.start()
     redisClient.setOptions(CLIENT_OPTIONS)
 
@@ -120,13 +114,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "CONNECT"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.NET_PEER_NAME.key" PEER_NAME
-            "$SemanticAttributes.NET_PEER_IP.key" PEER_IP
             "$SemanticAttributes.NET_PEER_PORT.key" port
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
-            "$SemanticAttributes.DB_STATEMENT.key" "CONNECT"
           }
         }
       }
@@ -154,14 +145,12 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "CONNECT"
           kind CLIENT
-          errored true
-          errorEvent CompletionException, String
+          status ERROR
+          errorEvent AbstractChannel.AnnotatedConnectException, String
           attributes {
             "$SemanticAttributes.NET_PEER_NAME.key" PEER_NAME
-            "$SemanticAttributes.NET_PEER_IP.key" PEER_IP
             "$SemanticAttributes.NET_PEER_PORT.key" incorrectPort
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
-            "$SemanticAttributes.DB_STATEMENT.key" "CONNECT"
           }
         }
       }
@@ -180,10 +169,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "SET"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "SET TESTSETKEY ?"
+            "$SemanticAttributes.DB_OPERATION.key" "SET"
           }
         }
       }
@@ -213,10 +202,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "GET"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "GET TESTKEY"
+            "$SemanticAttributes.DB_OPERATION.key" "GET"
           }
         }
       }
@@ -260,10 +249,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "GET"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "GET NON_EXISTENT_KEY"
+            "$SemanticAttributes.DB_OPERATION.key" "GET"
           }
         }
       }
@@ -293,10 +282,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "RANDOMKEY"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "RANDOMKEY"
+            "$SemanticAttributes.DB_OPERATION.key" "RANDOMKEY"
           }
         }
       }
@@ -344,10 +333,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "HMSET"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "HMSET TESTHM firstname ? lastname ? age ?"
+            "$SemanticAttributes.DB_OPERATION.key" "HMSET"
           }
         }
       }
@@ -355,10 +344,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "HGETALL"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "HGETALL TESTHM"
+            "$SemanticAttributes.DB_OPERATION.key" "HGETALL"
           }
         }
       }
@@ -396,11 +385,12 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "DEL"
           kind CLIENT
-          errored true
+          status ERROR
           errorEvent(IllegalStateException, "TestException")
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "DEL key1 key2"
+            "$SemanticAttributes.DB_OPERATION.key" "DEL"
           }
         }
       }
@@ -432,10 +422,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "SADD"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "SADD SKEY ? ?"
+            "$SemanticAttributes.DB_OPERATION.key" "SADD"
             "lettuce.command.cancelled" true
           }
         }
@@ -453,10 +443,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "DEBUG"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "DEBUG SEGFAULT"
+            "$SemanticAttributes.DB_OPERATION.key" "DEBUG"
           }
         }
       }
@@ -474,10 +464,10 @@ class LettuceAsyncClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "SHUTDOWN"
           kind CLIENT
-          errored false
           attributes {
             "$SemanticAttributes.DB_SYSTEM.key" "redis"
             "$SemanticAttributes.DB_STATEMENT.key" "SHUTDOWN NOSAVE"
+            "$SemanticAttributes.DB_OPERATION.key" "SHUTDOWN"
           }
         }
       }

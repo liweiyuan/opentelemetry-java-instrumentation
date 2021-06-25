@@ -1,11 +1,21 @@
+plugins {
+  id("otel.java-conventions")
+  id("otel.publish-conventions")
+}
+
 group = 'io.opentelemetry.javaagent'
 
-apply from: "$rootDir/gradle/java.gradle"
-apply from: "$rootDir/gradle/publish.gradle"
-
-// FIXME: Improve test coverage.
-minimumBranchCoverage = 0.0
-minimumInstructionCoverage = 0.0
+// patch inner class from Caffeine to avoid ForkJoinTask from being loaded too early
+sourceSets {
+  patch {
+    java {}
+  }
+}
+jar {
+  from(sourceSets.patch.output) {
+    include 'io/opentelemetry/instrumentation/api/internal/shaded/caffeine/cache/BoundedLocalCache$PerformCleanupTask.class'
+  }
+}
 
 configurations {
   // classpath used by the instrumentation muzzle plugin
@@ -17,17 +27,17 @@ configurations {
 }
 
 dependencies {
-  api deps.opentelemetryApi
-  api deps.opentelemetryApiMetrics
-  compileOnly deps.opentelemetrySdk
-  implementation deps.slf4j
-  implementation group: 'org.slf4j', name: 'slf4j-simple', version: versions.slf4j
+  api "io.opentelemetry:opentelemetry-api"
+  api "io.opentelemetry:opentelemetry-api-metrics"
+  compileOnly "io.opentelemetry:opentelemetry-sdk"
+  implementation "org.slf4j:slf4j-api"
+  implementation "org.slf4j:slf4j-simple"
   // ^ Generally a bad idea for libraries, but we're shadowing.
 
   implementation project(':javaagent-api')
   implementation project(':instrumentation-api')
 
   testImplementation project(':testing-common')
-  testImplementation group: 'org.mockito', name: 'mockito-core', version: '3.6.0'
-  testImplementation deps.assertj
+  testImplementation "org.mockito:mockito-core"
+  testImplementation "org.assertj:assertj-core"
 }

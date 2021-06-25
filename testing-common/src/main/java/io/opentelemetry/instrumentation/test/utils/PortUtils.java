@@ -6,26 +6,23 @@
 package io.opentelemetry.instrumentation.test.utils;
 
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.TimeUnit;
 
-public class PortUtils {
+public final class PortUtils {
 
-  public static int UNUSABLE_PORT = 61;
+  public static final int UNUSABLE_PORT = 61;
 
-  /** Open up a random, reusable port. */
-  public static int randomOpenPort() {
-    ServerSocket socket;
-    try {
-      socket = new ServerSocket(0);
-      socket.setReuseAddress(true);
-      socket.close();
-      return socket.getLocalPort();
-    } catch (IOException ioe) {
-      ioe.printStackTrace();
-      return -1;
-    }
+  private static final PortAllocator portAllocator = new PortAllocator();
+
+  /** Find consecutive open ports, returning the first one in the range. */
+  public static int findOpenPorts(int count) {
+    return portAllocator.getPorts(count);
+  }
+
+  /** Find open port. */
+  public static int findOpenPort() {
+    return portAllocator.getPort();
   }
 
   private static boolean isPortOpen(int port) {
@@ -48,11 +45,11 @@ public class PortUtils {
         TimeUnit.MILLISECONDS.sleep(100);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
-        throw new RuntimeException("Interrupted while waiting for " + port + " to be opened");
+        throw new IllegalStateException("Interrupted while waiting for " + port + " to be opened");
       }
     }
 
-    throw new RuntimeException("Timed out waiting for port " + port + " to be opened");
+    throw new IllegalStateException("Timed out waiting for port " + port + " to be opened");
   }
 
   public static void waitForPortToOpen(int port, long timeout, TimeUnit unit, Process process) {
@@ -62,13 +59,13 @@ public class PortUtils {
       try {
         Thread.sleep(100);
       } catch (InterruptedException e) {
-        throw new RuntimeException("Interrupted while waiting for " + port + " to be opened");
+        throw new IllegalStateException("Interrupted while waiting for " + port + " to be opened");
       }
 
       // Note: we should have used `process.isAlive()` here but it is java8 only
       try {
         process.exitValue();
-        throw new RuntimeException("Process died before port " + port + " was opened");
+        throw new IllegalStateException("Process died before port " + port + " was opened");
       } catch (IllegalThreadStateException e) {
         // process is still alive, things are good.
       }
@@ -78,6 +75,8 @@ public class PortUtils {
       }
     }
 
-    throw new RuntimeException("Timed out waiting for port " + port + " to be opened");
+    throw new IllegalStateException("Timed out waiting for port " + port + " to be opened");
   }
+
+  private PortUtils() {}
 }

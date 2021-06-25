@@ -10,6 +10,8 @@ import application.io.opentelemetry.api.metrics.LongUpDownSumObserverBuilder;
 import application.io.opentelemetry.api.metrics.common.Labels;
 import java.util.function.Consumer;
 
+// For observers, which have no API, there might be a better pattern than wrapping.
+@SuppressWarnings("FieldCanBeLocal")
 class ApplicationLongUpDownSumObserver implements LongUpDownSumObserver {
 
   private final io.opentelemetry.api.metrics.LongUpDownSumObserver agentLongUpDownSumObserver;
@@ -20,7 +22,7 @@ class ApplicationLongUpDownSumObserver implements LongUpDownSumObserver {
   }
 
   static class AgentResultLongUpDownSumObserver
-      implements Consumer<io.opentelemetry.api.metrics.LongUpDownSumObserver.LongResult> {
+      implements Consumer<io.opentelemetry.api.metrics.AsynchronousInstrument.LongResult> {
 
     private final Consumer<LongResult> metricUpdater;
 
@@ -29,18 +31,18 @@ class ApplicationLongUpDownSumObserver implements LongUpDownSumObserver {
     }
 
     @Override
-    public void accept(io.opentelemetry.api.metrics.LongUpDownSumObserver.LongResult result) {
+    public void accept(io.opentelemetry.api.metrics.AsynchronousInstrument.LongResult result) {
       metricUpdater.accept(new ApplicationResultLongUpDownSumObserver(result));
     }
   }
 
   static class ApplicationResultLongUpDownSumObserver implements LongResult {
 
-    private final io.opentelemetry.api.metrics.LongUpDownSumObserver.LongResult
+    private final io.opentelemetry.api.metrics.AsynchronousInstrument.LongResult
         agentResultLongUpDownSumObserver;
 
     public ApplicationResultLongUpDownSumObserver(
-        io.opentelemetry.api.metrics.LongUpDownSumObserver.LongResult
+        io.opentelemetry.api.metrics.AsynchronousInstrument.LongResult
             agentResultLongUpDownSumObserver) {
       this.agentResultLongUpDownSumObserver = agentResultLongUpDownSumObserver;
     }

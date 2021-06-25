@@ -4,6 +4,7 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderTrace
 import static org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING
 
@@ -16,9 +17,7 @@ import org.elasticsearch.common.io.FileSystemUtils
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.transport.TransportAddress
 import org.elasticsearch.index.IndexNotFoundException
-import org.elasticsearch.node.InternalSettingsPreparer
 import org.elasticsearch.node.Node
-import org.elasticsearch.transport.Netty4Plugin
 import org.elasticsearch.transport.RemoteTransportException
 import org.elasticsearch.transport.TransportService
 import org.elasticsearch.transport.client.PreBuiltTransportClient
@@ -49,7 +48,7 @@ class Elasticsearch6TransportClientTest extends AgentInstrumentationSpecificatio
       .put(CLUSTER_NAME_SETTING.getKey(), clusterName)
       .put("discovery.type", "single-node")
       .build()
-    testNode = new Node(InternalSettingsPreparer.prepareEnvironment(settings, null), [Netty4Plugin])
+    testNode = NodeFactory.newNode(settings)
     testNode.start()
     tcpPublishAddress = testNode.injector().getInstance(TransportService).boundAddress().publishAddress()
 
@@ -84,10 +83,10 @@ class Elasticsearch6TransportClientTest extends AgentInstrumentationSpecificatio
     setup:
     def result = client.admin().cluster().health(new ClusterHealthRequest())
 
-    def status = result.get().status
+    def clusterHealthStatus = result.get().status
 
     expect:
-    status.name() == "GREEN"
+    clusterHealthStatus.name() == "GREEN"
 
     assertTraces(1) {
       trace(0, 1) {
@@ -121,7 +120,7 @@ class Elasticsearch6TransportClientTest extends AgentInstrumentationSpecificatio
         span(0) {
           name "GetAction"
           kind CLIENT
-          errored true
+          status ERROR
           errorEvent RemoteTransportException, String
           attributes {
             "${SemanticAttributes.DB_SYSTEM.key}" "elasticsearch"
@@ -176,14 +175,12 @@ class Elasticsearch6TransportClientTest extends AgentInstrumentationSpecificatio
 
     and:
     assertTraces(5) {
-      sortTraces {
-        // IndexAction and PutMappingAction run in separate threads and so their order is not always the same
-        if (traces[2][0].name == "IndexAction") {
-          def tmp = traces[2]
-          traces[2] = traces[3]
-          traces[3] = tmp
-        }
-      }
+      // PutMappingAction and IndexAction run in separate threads so their order can vary
+      traces.subList(2, 4).sort(orderByRootSpanName(
+        "PutMappingAction", // elasticsearch < 7
+        "AutoPutMappingAction", // elasticsearch >= 7
+        "IndexAction"))
+
       trace(0, 1) {
         span(0) {
           name "CreateIndexAction"
@@ -221,12 +218,12 @@ class Elasticsearch6TransportClientTest extends AgentInstrumentationSpecificatio
       }
       trace(2, 1) {
         span(0) {
-          name "PutMappingAction"
+          name ~/(Auto)?PutMappingAction/
           kind CLIENT
           attributes {
             "${SemanticAttributes.DB_SYSTEM.key}" "elasticsearch"
-            "${SemanticAttributes.DB_OPERATION.key}" "PutMappingAction"
-            "elasticsearch.action" "PutMappingAction"
+            "${SemanticAttributes.DB_OPERATION.key}" ~/(Auto)?PutMappingAction/
+            "elasticsearch.action" ~/(Auto)?PutMappingAction/
             "elasticsearch.request" "PutMappingRequest"
           }
         }

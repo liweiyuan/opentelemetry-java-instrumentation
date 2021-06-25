@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import static io.opentelemetry.api.trace.SpanKind.SERVER
 import static io.opentelemetry.instrumentation.test.utils.ClassUtils.getClassName
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderServerTrace
 
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
+import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
 import javax.ws.rs.DELETE
 import javax.ws.rs.GET
 import javax.ws.rs.HEAD
@@ -14,17 +16,19 @@ import javax.ws.rs.OPTIONS
 import javax.ws.rs.POST
 import javax.ws.rs.PUT
 import javax.ws.rs.Path
+import spock.lang.Unroll
 
 class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecification {
 
   def "instrumentation can be used as root span and resource is set to METHOD PATH"() {
     setup:
-    new Jax() {
+    def jax = new Jax() {
       @POST
       @Path("/a")
       void call() {
       }
-    }.call()
+    }
+    jax.call()
 
     expect:
     assertTraces(1) {
@@ -32,13 +36,16 @@ class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecifica
         span(0) {
           name "/a"
           attributes {
+            "${SemanticAttributes.CODE_NAMESPACE.key}" jax.getClass().getName()
+            "${SemanticAttributes.CODE_FUNCTION.key}" "call"
           }
         }
       }
     }
   }
 
-  def "span named '#paramName' from annotations on class when is not root span"() {
+  @Unroll
+  def "span named '#paramName' from annotations on class '#className' when is not root span"() {
     setup:
     runUnderServerTrace("test") {
       obj.call()
@@ -49,6 +56,7 @@ class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecifica
       trace(0, 2) {
         span(0) {
           name paramName
+          kind SERVER
           hasNoParent()
           attributes {
           }
@@ -57,6 +65,8 @@ class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecifica
           name "${className}.call"
           childOf span(0)
           attributes {
+            "${SemanticAttributes.CODE_NAMESPACE.key}" obj.getClass().getName()
+            "${SemanticAttributes.CODE_FUNCTION.key}" "call"
           }
         }
       }
@@ -118,8 +128,7 @@ class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecifica
     }
     "/child/call"  | new ChildClassWithPath()
     "/child/call"  | new JavaInterfaces.ChildClassOnInterface()
-    // TODO: uncomment when we drop support for Java 7
-    // "/child/invoke"  | new JavaInterfaces.DefaultChildClassOnInterface()
+    "/child/call"  | new JavaInterfaces.DefaultChildClassOnInterface()
 
     className = getClassName(obj.class)
   }
@@ -135,6 +144,7 @@ class JaxRsAnnotations1InstrumentationTest extends AgentInstrumentationSpecifica
       trace(0, 1) {
         span(0) {
           name "test"
+          kind SERVER
           attributes {
           }
         }

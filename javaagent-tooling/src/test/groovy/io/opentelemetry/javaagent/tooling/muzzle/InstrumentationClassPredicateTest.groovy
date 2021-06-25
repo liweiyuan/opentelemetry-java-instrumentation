@@ -11,24 +11,31 @@ import spock.lang.Unroll
 class InstrumentationClassPredicateTest extends Specification {
   @Unroll
   def "should collect references for #desc"() {
+    setup:
+    def predicate = new InstrumentationClassPredicate({ it.startsWith("com.example.instrumentation.library") })
+
     expect:
-    InstrumentationClassPredicate.isInstrumentationClass(className)
+    predicate.isInstrumentationClass(className)
 
     where:
-    desc                            | className
-    "auto instrumentation class"    | "io.opentelemetry.javaagent.instrumentation.some_instrumentation.Advice"
-    "javaagent-tooling class"       | "io.opentelemetry.javaagent.tooling.Constants"
-    "library instrumentation class" | "io.opentelemetry.instrumentation.LibraryClass"
+    desc                                       | className
+    "javaagent instrumentation class"          | "io.opentelemetry.javaagent.instrumentation.some_instrumentation.Advice"
+    "library instrumentation class"            | "io.opentelemetry.instrumentation.LibraryClass"
+    "additional library instrumentation class" | "com.example.instrumentation.library.ThirdPartyExternalInstrumentation"
   }
 
   @Unroll
   def "should not collect references for #desc"() {
+    setup:
+    def predicate = new InstrumentationClassPredicate({ false })
+
     expect:
-    !InstrumentationClassPredicate.isInstrumentationClass(className)
+    !predicate.isInstrumentationClass(className)
 
     where:
     desc                        | className
     "Java SDK class"            | "java.util.ArrayList"
+    "javaagent-tooling class"   | "io.opentelemetry.javaagent.tooling.Constants"
     "instrumentation-api class" | "io.opentelemetry.instrumentation.api.InstrumentationVersion"
     "javaagent-api class"       | "io.opentelemetry.javaagent.instrumentation.api.ContextStore"
   }

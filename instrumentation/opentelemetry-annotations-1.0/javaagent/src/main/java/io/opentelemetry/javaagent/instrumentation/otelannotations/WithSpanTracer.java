@@ -10,6 +10,9 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.instrumentation.api.tracer.BaseTracer;
+import io.opentelemetry.instrumentation.api.tracer.SpanNames;
+import io.opentelemetry.instrumentation.api.tracer.async.AsyncSpanEndStrategies;
+import io.opentelemetry.instrumentation.api.tracer.async.AsyncSpanEndStrategy;
 import java.lang.reflect.Method;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,32 +26,35 @@ public class WithSpanTracer extends BaseTracer {
 
   private static final Logger log = LoggerFactory.getLogger(WithSpanTracer.class);
 
+  private final AsyncSpanEndStrategies asyncSpanEndStrategies =
+      AsyncSpanEndStrategies.getInstance();
+
   public Context startSpan(
-      Context context, WithSpan applicationAnnotation, Method method, SpanKind kind) {
+      Context parentContext, WithSpan applicationAnnotation, Method method, SpanKind kind) {
     Span span =
-        spanBuilder(spanNameForMethodWithAnnotation(applicationAnnotation, method), kind)
-            .setParent(context)
+        spanBuilder(
+                parentContext, spanNameForMethodWithAnnotation(applicationAnnotation, method), kind)
             .startSpan();
     if (kind == SpanKind.SERVER) {
-      return withServerSpan(context, span);
+      return withServerSpan(parentContext, span);
     }
     if (kind == SpanKind.CLIENT) {
-      return withClientSpan(context, span);
+      return withClientSpan(parentContext, span);
     }
-    return context.with(span);
+    return parentContext.with(span);
   }
 
   /**
    * This method is used to generate an acceptable span (operation) name based on a given method
    * reference. It first checks for existence of {@link WithSpan} annotation. If it is present, then
    * tries to derive name from its {@code value} attribute. Otherwise delegates to {@link
-   * #spanNameForMethod(Method)}.
+   * SpanNames#fromMethod(Method)}.
    */
   public String spanNameForMethodWithAnnotation(WithSpan applicationAnnotation, Method method) {
     if (applicationAnnotation != null && !applicationAnnotation.value().isEmpty()) {
       return applicationAnnotation.value();
     }
-    return spanNameForMethod(method);
+    return SpanNames.fromMethod(method);
   }
 
   public SpanKind extractSpanKind(WithSpan applicationAnnotation) {
@@ -67,6 +73,30 @@ public class WithSpanTracer extends BaseTracer {
       log.debug("unexpected span kind: {}", applicationSpanKind.name());
       return SpanKind.INTERNAL;
     }
+  }
+
+  /**
+   * Denotes the end of the invocation of the traced method with a successful result which will end
+   * the span stored in the passed {@code context}. If the method returned a value representing an
+   * asynchronous operation then the span will not be finished until the asynchronous operation has
+   * completed.
+   *
+   * @param returnType Return type of the traced method.
+   * @param returnValue Return value from the traced method.
+   * @return Either {@code returnValue} or a value composing over {@code returnValue} for
+   *     notification of completion.
+   * @throws ClassCastException if returnValue is not an instance of returnType
+   */
+  public Object end(Context context, Class<?> returnType, Object returnValue) {
+    if (returnType.isInstance(returnValue)) {
+      AsyncSpanEndStrategy asyncSpanEndStrategy =
+          asyncSpanEndStrategies.resolveStrategy(returnType);
+      if (asyncSpanEndStrategy != null) {
+        return asyncSpanEndStrategy.end(this, context, returnValue);
+      }
+    }
+    end(context);
+    return returnValue;
   }
 
   @Override

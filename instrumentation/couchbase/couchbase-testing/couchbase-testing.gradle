@@ -1,14 +1,16 @@
-apply from: "$rootDir/gradle/java.gradle"
+plugins {
+  id("otel.java-conventions")
+}
 
 dependencies {
   api project(':testing-common')
 
-  api group: 'com.couchbase.mock', name: 'CouchbaseMock', version: '1.5.19'
+  api "com.couchbase.mock:CouchbaseMock:1.5.19"
   // Earliest version that seems to allow queries with CouchbaseMock:
-  api group: 'com.couchbase.client', name: 'java-client', version: '2.5.0'
-  api group: 'org.springframework.data', name: 'spring-data-couchbase', version: '2.0.0.RELEASE'
+  api "com.couchbase.client:java-client:2.5.0"
+  api "org.springframework.data:spring-data-couchbase:2.0.0.RELEASE"
 
-  implementation deps.groovy
-  implementation deps.opentelemetryApi
-  implementation deps.spock
+  implementation "org.codehaus.groovy:groovy-all"
+  implementation "io.opentelemetry:opentelemetry-api"
+  implementation "org.spockframework:spock-core"
 }

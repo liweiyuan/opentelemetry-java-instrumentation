@@ -9,6 +9,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.instrumentation.api.tracer.BaseTracer;
+import io.opentelemetry.instrumentation.api.tracer.SpanNames;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import java.lang.reflect.Method;
 
@@ -21,12 +22,13 @@ public class SpringWsTracer extends BaseTracer {
   }
 
   public Context startSpan(Method method) {
+    Context parentContext = Context.current();
     Span span =
-        spanBuilder(spanNameForMethod(method), SpanKind.INTERNAL)
+        spanBuilder(parentContext, SpanNames.fromMethod(method), SpanKind.INTERNAL)
             .setAttribute(SemanticAttributes.CODE_NAMESPACE, method.getDeclaringClass().getName())
             .setAttribute(SemanticAttributes.CODE_FUNCTION, method.getName())
             .startSpan();
-    return Context.current().with(span);
+    return parentContext.with(span);
   }
 
   @Override

@@ -12,6 +12,7 @@ public class TestHelperClasses {
   public static class Helper extends HelperSuperClass implements HelperInterface {
 
     @Override
+    @SuppressWarnings("ModifiedButNotUsed")
     public void foo() {
       List<String> list = new ArrayList<>();
       list.add(getStr());
@@ -22,7 +23,7 @@ public class TestHelperClasses {
       return 54321;
     }
 
-    private String getStr() {
+    private static String getStr() {
       return "abc";
     }
   }

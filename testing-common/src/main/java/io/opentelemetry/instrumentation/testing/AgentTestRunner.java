@@ -7,6 +7,9 @@ package io.opentelemetry.instrumentation.testing;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.instrumentation.test.utils.LoggerUtils;
 import io.opentelemetry.javaagent.testing.common.AgentTestingExporterAccess;
 import io.opentelemetry.javaagent.testing.common.TestAgentListenerAccess;
 import io.opentelemetry.sdk.metrics.data.MetricData;
@@ -22,8 +25,8 @@ import org.slf4j.LoggerFactory;
  */
 public final class AgentTestRunner implements InstrumentationTestRunner {
   static {
-    ((Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(Level.WARN);
-    ((Logger) LoggerFactory.getLogger("io.opentelemetry")).setLevel(Level.DEBUG);
+    LoggerUtils.setLevel(LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME), Level.WARN);
+    LoggerUtils.setLevel(LoggerFactory.getLogger("io.opentelemetry"), Level.DEBUG);
   }
 
   private static final AgentTestRunner INSTANCE = new AgentTestRunner();
@@ -43,6 +46,11 @@ public final class AgentTestRunner implements InstrumentationTestRunner {
     assert TestAgentListenerAccess.getInstrumentationErrorCount() == 0
         : TestAgentListenerAccess.getInstrumentationErrorCount()
             + " Instrumentation errors during test";
+    // additional library ignores are ignored during tests, because they can make it really
+    // confusing for contributors wondering why their instrumentation is not applied
+    //
+    // but we then need to make sure that the additional library ignores won't then silently prevent
+    // the instrumentation from being applied in real life outside of these tests
     assert TestAgentListenerAccess.getIgnoredButTransformedClassNames().isEmpty()
         : "Transformed classes match global libraries ignore matcher: "
             + TestAgentListenerAccess.getIgnoredButTransformedClassNames();
@@ -51,6 +59,11 @@ public final class AgentTestRunner implements InstrumentationTestRunner {
   @Override
   public void clearAllExportedData() {
     AgentTestingExporterAccess.reset();
+  }
+
+  @Override
+  public OpenTelemetry getOpenTelemetry() {
+    return GlobalOpenTelemetry.get();
   }
 
   @Override

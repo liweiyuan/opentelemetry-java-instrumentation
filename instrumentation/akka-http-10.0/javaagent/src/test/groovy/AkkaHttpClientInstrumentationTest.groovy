@@ -4,20 +4,22 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 
 import akka.actor.ActorSystem
 import akka.http.javadsl.Http
 import akka.http.javadsl.model.HttpMethods
 import akka.http.javadsl.model.HttpRequest
+import akka.http.javadsl.model.HttpResponse
 import akka.http.javadsl.model.headers.RawHeader
 import akka.stream.ActorMaterializer
 import io.opentelemetry.instrumentation.test.AgentTestTrait
 import io.opentelemetry.instrumentation.test.base.HttpClientTest
+import io.opentelemetry.instrumentation.test.base.SingleConnection
+import java.util.concurrent.TimeUnit
 import spock.lang.Shared
-import spock.lang.Timeout
 
-@Timeout(5)
-class AkkaHttpClientInstrumentationTest extends HttpClientTest implements AgentTestTrait {
+class AkkaHttpClientInstrumentationTest extends HttpClientTest<HttpRequest> implements AgentTestTrait {
 
   @Shared
   ActorSystem system = ActorSystem.create()
@@ -25,21 +27,32 @@ class AkkaHttpClientInstrumentationTest extends HttpClientTest implements AgentT
   ActorMaterializer materializer = ActorMaterializer.create(system)
 
   @Override
-  int doRequest(String method, URI uri, Map<String, String> headers, Closure callback) {
-    def request = HttpRequest.create(uri.toString())
+  HttpRequest buildRequest(String method, URI uri, Map<String, String> headers) {
+    return HttpRequest.create(uri.toString())
       .withMethod(HttpMethods.lookup(method).get())
       .addHeaders(headers.collect { RawHeader.create(it.key, it.value) })
+  }
 
-    def response = Http.get(system)
+  @Override
+  int sendRequest(HttpRequest request, String method, URI uri, Map<String, String> headers) {
+    HttpResponse response = Http.get(system)
       .singleRequest(request, materializer)
-    //.whenComplete { result, error ->
-    // FIXME: Callback should be here instead.
-    //  callback?.call()
-    //}
       .toCompletableFuture()
-      .get()
-    callback?.call()
+      .get(10, TimeUnit.SECONDS)
+
+    response.discardEntityBytes(materializer)
+
     return response.status().intValue()
+  }
+
+  @Override
+  void sendRequestWithCallback(HttpRequest request, String method, URI uri, Map<String, String> headers, RequestResult requestResult) {
+    Http.get(system).singleRequest(request, materializer).whenComplete {response, throwable ->
+      if (throwable == null) {
+        response.discardEntityBytes(materializer)
+      }
+      requestResult.complete({ response.status().intValue() }, throwable)
+    }
   }
 
   @Override
@@ -48,14 +61,10 @@ class AkkaHttpClientInstrumentationTest extends HttpClientTest implements AgentT
   }
 
   @Override
-  boolean testRemoteConnection() {
-    // Not sure how to properly set timeouts...
-    return false
-  }
-
-  @Override
-  boolean testCausality() {
-    false
+  SingleConnection createSingleConnection(String host, int port) {
+    // singleConnection test would require instrumentation to support requests made through pools
+    // (newHostConnectionPool, superPool, etc), which is currently not supported.
+    return null
   }
 
   def "singleRequest exception trace"() {
@@ -71,7 +80,7 @@ class AkkaHttpClientInstrumentationTest extends HttpClientTest implements AgentT
           hasNoParent()
           name "HTTP request"
           kind CLIENT
-          errored true
+          status ERROR
           errorEvent(NullPointerException, e.getMessage())
         }
       }

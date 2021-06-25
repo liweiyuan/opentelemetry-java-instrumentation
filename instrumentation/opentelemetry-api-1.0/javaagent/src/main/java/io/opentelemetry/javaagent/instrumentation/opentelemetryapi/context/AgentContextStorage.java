@@ -14,6 +14,7 @@ import application.io.opentelemetry.context.Scope;
 import io.opentelemetry.javaagent.instrumentation.opentelemetryapi.baggage.BaggageBridging;
 import io.opentelemetry.javaagent.instrumentation.opentelemetryapi.trace.Bridging;
 import java.lang.reflect.Field;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +32,9 @@ import org.slf4j.LoggerFactory;
  * always stores and retrieves them from the agent context, even when accessed from the application.
  * All other accesses are to the concrete application context.
  */
-public class AgentContextStorage implements ContextStorage {
+// Annotation doesn't work on some fields due to fully qualified name (no clue why it matters...)
+@SuppressWarnings("FieldMissingNullable")
+public class AgentContextStorage implements ContextStorage, AutoCloseable {
 
   private static final Logger logger = LoggerFactory.getLogger(AgentContextStorage.class);
 
@@ -53,11 +56,11 @@ public class AgentContextStorage implements ContextStorage {
 
   static final io.opentelemetry.context.ContextKey<io.opentelemetry.api.trace.Span>
       AGENT_SPAN_CONTEXT_KEY;
-  static final ContextKey<Span> APPLICATION_SPAN_CONTEXT_KEY;
+  @Nullable static final ContextKey<Span> APPLICATION_SPAN_CONTEXT_KEY;
 
   static final io.opentelemetry.context.ContextKey<io.opentelemetry.api.baggage.Baggage>
       AGENT_BAGGAGE_CONTEXT_KEY;
-  static final ContextKey<Baggage> APPLICATION_BAGGAGE_CONTEXT_KEY;
+  @Nullable static final ContextKey<Baggage> APPLICATION_BAGGAGE_CONTEXT_KEY;
 
   static {
     io.opentelemetry.context.ContextKey<io.opentelemetry.api.trace.Span> agentSpanContextKey;
@@ -145,6 +148,15 @@ public class AgentContextStorage implements ContextStorage {
     return new AgentContextWrapper(io.opentelemetry.context.Context.current(), applicationContext);
   }
 
+  @Override
+  public void close() throws Exception {
+    io.opentelemetry.context.ContextStorage agentStorage =
+        io.opentelemetry.context.ContextStorage.get();
+    if (agentStorage instanceof AutoCloseable) {
+      ((AutoCloseable) agentStorage).close();
+    }
+  }
+
   public static class AgentContextWrapper implements Context {
     private final io.opentelemetry.context.Context agentContext;
     private final Context applicationContext;
@@ -207,6 +219,11 @@ public class AgentContextStorage implements ContextStorage {
             agentContext.with(AGENT_BAGGAGE_CONTEXT_KEY, agentBaggage), applicationContext);
       }
       return new AgentContextWrapper(agentContext, applicationContext.with(k1, v1));
+    }
+
+    @Override
+    public String toString() {
+      return "{agentContext=" + agentContext + ", applicationContext=" + applicationContext + "}";
     }
   }
 }

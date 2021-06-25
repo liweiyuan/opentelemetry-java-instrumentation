@@ -29,14 +29,15 @@ import io.opentelemetry.proto.common.v1.ArrayValue;
 import io.opentelemetry.proto.common.v1.InstrumentationLibrary;
 import io.opentelemetry.proto.common.v1.KeyValue;
 import io.opentelemetry.proto.common.v1.StringKeyValue;
-import io.opentelemetry.proto.metrics.v1.DoubleDataPoint;
-import io.opentelemetry.proto.metrics.v1.DoubleHistogramDataPoint;
-import io.opentelemetry.proto.metrics.v1.DoubleSum;
+import io.opentelemetry.proto.metrics.v1.HistogramDataPoint;
 import io.opentelemetry.proto.metrics.v1.InstrumentationLibraryMetrics;
 import io.opentelemetry.proto.metrics.v1.IntDataPoint;
 import io.opentelemetry.proto.metrics.v1.IntSum;
 import io.opentelemetry.proto.metrics.v1.Metric;
+import io.opentelemetry.proto.metrics.v1.NumberDataPoint;
 import io.opentelemetry.proto.metrics.v1.ResourceMetrics;
+import io.opentelemetry.proto.metrics.v1.Sum;
+import io.opentelemetry.proto.metrics.v1.SummaryDataPoint;
 import io.opentelemetry.proto.resource.v1.Resource;
 import io.opentelemetry.proto.trace.v1.InstrumentationLibrarySpans;
 import io.opentelemetry.proto.trace.v1.ResourceSpans;
@@ -45,6 +46,8 @@ import io.opentelemetry.proto.trace.v1.Status;
 import io.opentelemetry.sdk.common.InstrumentationLibraryInfo;
 import io.opentelemetry.sdk.metrics.data.AggregationTemporality;
 import io.opentelemetry.sdk.metrics.data.DoubleGaugeData;
+import io.opentelemetry.sdk.metrics.data.DoubleHistogramData;
+import io.opentelemetry.sdk.metrics.data.DoubleHistogramPointData;
 import io.opentelemetry.sdk.metrics.data.DoublePointData;
 import io.opentelemetry.sdk.metrics.data.DoubleSumData;
 import io.opentelemetry.sdk.metrics.data.DoubleSummaryData;
@@ -66,7 +69,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.regex.Pattern;
-import org.jetbrains.annotations.NotNull;
+import java.util.stream.Collectors;
 
 public final class AgentTestingExporterAccess {
   private static final char TRACESTATE_KEY_VALUE_DELIMITER = '=';
@@ -104,7 +107,7 @@ public final class AgentTestingExporterAccess {
               "forceFlushCalled",
               MethodType.methodType(boolean.class));
     } catch (Exception e) {
-      throw new Error("Error accessing fields with reflection.", e);
+      throw new AssertionError("Error accessing fields with reflection.", e);
     }
   }
 
@@ -112,7 +115,7 @@ public final class AgentTestingExporterAccess {
     try {
       reset.invokeExact();
     } catch (Throwable t) {
-      throw new Error("Could not invoke reset", t);
+      throw new AssertionError("Could not invoke reset", t);
     }
   }
 
@@ -120,7 +123,7 @@ public final class AgentTestingExporterAccess {
     try {
       return (boolean) forceFlushCalled.invokeExact();
     } catch (Throwable t) {
-      throw new Error("Could not invoke forceFlushCalled", t);
+      throw new AssertionError("Could not invoke forceFlushCalled", t);
     }
   }
 
@@ -130,7 +133,7 @@ public final class AgentTestingExporterAccess {
     try {
       exportRequests = (List<byte[]>) getSpanExportRequests.invokeExact();
     } catch (Throwable t) {
-      throw new Error("Could not invoke getSpanExportRequests", t);
+      throw new AssertionError("Could not invoke getSpanExportRequests", t);
     }
 
     List<ResourceSpans> allResourceSpans =
@@ -140,7 +143,7 @@ public final class AgentTestingExporterAccess {
                   try {
                     return ExportTraceServiceRequest.parseFrom(serialized);
                   } catch (InvalidProtocolBufferException e) {
-                    throw new Error(e);
+                    throw new AssertionError(e);
                   }
                 })
             .flatMap(request -> request.getResourceSpansList().stream())
@@ -223,7 +226,7 @@ public final class AgentTestingExporterAccess {
     try {
       exportRequests = (List<byte[]>) getMetricExportRequests.invokeExact();
     } catch (Throwable t) {
-      throw new Error("Could not invoke getMetricExportRequests", t);
+      throw new AssertionError("Could not invoke getMetricExportRequests", t);
     }
 
     List<ResourceMetrics> allResourceMetrics =
@@ -233,7 +236,7 @@ public final class AgentTestingExporterAccess {
                   try {
                     return ExportMetricsServiceRequest.parseFrom(serialized);
                   } catch (InvalidProtocolBufferException e) {
-                    throw new Error(e);
+                    throw new AssertionError(e);
                   }
                 })
             .flatMap(request -> request.getResourceMetricsList().stream())
@@ -258,7 +261,6 @@ public final class AgentTestingExporterAccess {
     return metrics;
   }
 
-  @NotNull
   private static MetricData createMetricData(
       Metric metric,
       io.opentelemetry.sdk.resources.Resource resource,
@@ -272,15 +274,14 @@ public final class AgentTestingExporterAccess {
             metric.getDescription(),
             metric.getUnit(),
             LongGaugeData.create(getIntPoints(metric.getIntGauge().getDataPointsList())));
-      case DOUBLE_GAUGE:
+      case GAUGE:
         return MetricData.createDoubleGauge(
             resource,
             instrumentationLibraryInfo,
             metric.getName(),
             metric.getDescription(),
             metric.getUnit(),
-            DoubleGaugeData.create(
-                getDoublePointDatas(metric.getDoubleGauge().getDataPointsList())));
+            DoubleGaugeData.create(getDoublePointDatas(metric.getGauge().getDataPointsList())));
       case INT_SUM:
         IntSum intSum = metric.getIntSum();
         return MetricData.createLongSum(
@@ -293,8 +294,8 @@ public final class AgentTestingExporterAccess {
                 intSum.getIsMonotonic(),
                 getTemporality(intSum.getAggregationTemporality()),
                 getIntPoints(metric.getIntSum().getDataPointsList())));
-      case DOUBLE_SUM:
-        DoubleSum doubleSum = metric.getDoubleSum();
+      case SUM:
+        Sum doubleSum = metric.getSum();
         return MetricData.createDoubleSum(
             resource,
             instrumentationLibraryInfo,
@@ -304,8 +305,18 @@ public final class AgentTestingExporterAccess {
             DoubleSumData.create(
                 doubleSum.getIsMonotonic(),
                 getTemporality(doubleSum.getAggregationTemporality()),
-                getDoublePointDatas(metric.getDoubleSum().getDataPointsList())));
-      case DOUBLE_HISTOGRAM:
+                getDoublePointDatas(metric.getSum().getDataPointsList())));
+      case HISTOGRAM:
+        return MetricData.createDoubleHistogram(
+            resource,
+            instrumentationLibraryInfo,
+            metric.getName(),
+            metric.getDescription(),
+            metric.getUnit(),
+            DoubleHistogramData.create(
+                getTemporality(metric.getHistogram().getAggregationTemporality()),
+                getDoubleHistogramDataPoints(metric.getHistogram().getDataPointsList())));
+      case SUMMARY:
         return MetricData.createDoubleSummary(
             resource,
             instrumentationLibraryInfo,
@@ -313,7 +324,7 @@ public final class AgentTestingExporterAccess {
             metric.getDescription(),
             metric.getUnit(),
             DoubleSummaryData.create(
-                getDoubleHistogramDataPoints(metric.getDoubleHistogram().getDataPointsList())));
+                getDoubleSummaryDataPoints(metric.getSummary().getDataPointsList())));
       default:
         throw new AssertionError("Unexpected metric data: " + metric.getDataCase());
     }
@@ -339,20 +350,46 @@ public final class AgentTestingExporterAccess {
         .collect(toList());
   }
 
-  private static List<DoublePointData> getDoublePointDatas(List<DoubleDataPoint> points) {
+  private static List<DoublePointData> getDoublePointDatas(List<NumberDataPoint> points) {
     return points.stream()
         .map(
-            point ->
-                DoublePointData.create(
-                    point.getStartTimeUnixNano(),
-                    point.getTimeUnixNano(),
-                    createLabels(point.getLabelsList()),
-                    point.getValue()))
+            point -> {
+              final double value;
+              switch (point.getValueCase()) {
+                case AS_INT:
+                  value = point.getAsInt();
+                  break;
+                case AS_DOUBLE:
+                default:
+                  value = point.getAsDouble();
+                  break;
+              }
+              return DoublePointData.create(
+                  point.getStartTimeUnixNano(),
+                  point.getTimeUnixNano(),
+                  createLabels(point.getLabelsList()),
+                  value);
+            })
         .collect(toList());
   }
 
-  private static Collection<DoubleSummaryPointData> getDoubleHistogramDataPoints(
-      List<DoubleHistogramDataPoint> dataPointsList) {
+  private static Collection<DoubleHistogramPointData> getDoubleHistogramDataPoints(
+      List<HistogramDataPoint> dataPointsList) {
+    return dataPointsList.stream()
+        .map(
+            point ->
+                DoubleHistogramPointData.create(
+                    point.getStartTimeUnixNano(),
+                    point.getTimeUnixNano(),
+                    createLabels(point.getLabelsList()),
+                    point.getSum(),
+                    point.getExplicitBoundsList(),
+                    point.getBucketCountsList()))
+        .collect(toList());
+  }
+
+  private static Collection<DoubleSummaryPointData> getDoubleSummaryDataPoints(
+      List<SummaryDataPoint> dataPointsList) {
     return dataPointsList.stream()
         .map(
             point ->
@@ -366,12 +403,10 @@ public final class AgentTestingExporterAccess {
         .collect(toList());
   }
 
-  private static List<ValueAtPercentile> getValues(DoubleHistogramDataPoint point) {
-    List<ValueAtPercentile> values = new ArrayList<>();
-    for (int i = 0; i < point.getExplicitBoundsCount(); i++) {
-      values.add(ValueAtPercentile.create(point.getExplicitBounds(i), point.getBucketCounts(i)));
-    }
-    return values;
+  private static List<ValueAtPercentile> getValues(SummaryDataPoint point) {
+    return point.getQuantileValuesList().stream()
+        .map(v -> ValueAtPercentile.create(v.getQuantile(), v.getValue()))
+        .collect(Collectors.toList());
   }
 
   private static AggregationTemporality getTemporality(
@@ -475,7 +510,7 @@ public final class AgentTestingExporterAccess {
       case SPAN_KIND_CONSUMER:
         return SpanKind.CONSUMER;
       default:
-        return SpanKind.INTERNAL;
+        throw new IllegalArgumentException("Unexpected span kind: " + kind);
     }
   }
 

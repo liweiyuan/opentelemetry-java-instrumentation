@@ -5,25 +5,23 @@
 
 package io.opentelemetry.javaagent.instrumentation.javaconcurrent;
 
-import static io.opentelemetry.javaagent.tooling.bytebuddy.matcher.AgentElementMatchers.extendsClass;
-import static java.util.Collections.singletonMap;
+import static io.opentelemetry.javaagent.extension.matcher.AgentElementMatchers.extendsClass;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 import io.opentelemetry.context.Scope;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
+import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
 import io.opentelemetry.javaagent.instrumentation.api.ContextStore;
 import io.opentelemetry.javaagent.instrumentation.api.InstrumentationContext;
 import io.opentelemetry.javaagent.instrumentation.api.concurrent.AdviceUtils;
 import io.opentelemetry.javaagent.instrumentation.api.concurrent.State;
-import io.opentelemetry.javaagent.tooling.TypeInstrumentation;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import net.bytebuddy.asm.Advice;
-import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 
@@ -41,12 +39,13 @@ public class JavaForkJoinTaskInstrumentation implements TypeInstrumentation {
   }
 
   @Override
-  public Map<? extends ElementMatcher<? super MethodDescription>, String> transformers() {
-    return singletonMap(
+  public void transform(TypeTransformer transformer) {
+    transformer.applyAdviceToMethod(
         named("exec").and(takesArguments(0)).and(not(isAbstract())),
         JavaForkJoinTaskInstrumentation.class.getName() + "$ForkJoinTaskAdvice");
   }
 
+  @SuppressWarnings("unused")
   public static class ForkJoinTaskAdvice {
 
     /**
@@ -56,8 +55,8 @@ public class JavaForkJoinTaskInstrumentation implements TypeInstrumentation {
      * need to use that state.
      */
     @Advice.OnMethodEnter(suppress = Throwable.class)
-    public static Scope enter(@Advice.This ForkJoinTask thiz) {
-      ContextStore<ForkJoinTask, State> contextStore =
+    public static Scope enter(@Advice.This ForkJoinTask<?> thiz) {
+      ContextStore<ForkJoinTask<?>, State> contextStore =
           InstrumentationContext.get(ForkJoinTask.class, State.class);
       Scope scope = AdviceUtils.startTaskScope(contextStore, thiz);
       if (thiz instanceof Runnable) {
@@ -73,9 +72,9 @@ public class JavaForkJoinTaskInstrumentation implements TypeInstrumentation {
         }
       }
       if (thiz instanceof Callable) {
-        ContextStore<Callable, State> callableContextStore =
+        ContextStore<Callable<?>, State> callableContextStore =
             InstrumentationContext.get(Callable.class, State.class);
-        Scope newScope = AdviceUtils.startTaskScope(callableContextStore, (Callable) thiz);
+        Scope newScope = AdviceUtils.startTaskScope(callableContextStore, (Callable<?>) thiz);
         if (null != newScope) {
           if (null != scope) {
             newScope.close();

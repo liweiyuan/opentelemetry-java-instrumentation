@@ -1,4 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
+plugins {
+  id("otel.javaagent-instrumentation")
+}
 
 muzzle {
   pass {
@@ -7,5 +9,5 @@ muzzle {
 }
 
 dependencies {
-  testImplementation group: 'org.springframework', name: 'spring-web', version: '4.3.7.RELEASE'
+  testImplementation "org.springframework:spring-web:4.3.7.RELEASE"
 }

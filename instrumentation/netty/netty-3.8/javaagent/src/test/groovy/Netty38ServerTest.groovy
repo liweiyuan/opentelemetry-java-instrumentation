@@ -5,6 +5,7 @@
 
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.INDEXED_CHILD
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.NOT_FOUND
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.QUERY_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
@@ -36,6 +37,7 @@ import org.jboss.netty.handler.codec.http.HttpRequest
 import org.jboss.netty.handler.codec.http.HttpResponse
 import org.jboss.netty.handler.codec.http.HttpResponseStatus
 import org.jboss.netty.handler.codec.http.HttpServerCodec
+import org.jboss.netty.handler.codec.http.QueryStringDecoder
 import org.jboss.netty.handler.logging.LoggingHandler
 import org.jboss.netty.logging.InternalLogLevel
 import org.jboss.netty.logging.InternalLoggerFactory
@@ -71,13 +73,21 @@ class Netty38ServerTest extends HttpServerTest<ServerBootstrap> implements Agent
                 response = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.valueOf(endpoint.status))
                 response.setContent(responseContent)
                 break
+              case INDEXED_CHILD:
+                responseContent = ChannelBuffers.EMPTY_BUFFER
+                endpoint.collectSpanAttributes { new QueryStringDecoder(uri).getParameters().get(it).find() }
+                response = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.valueOf(endpoint.status))
+                response.setContent(responseContent)
+                break
               case QUERY_PARAM:
                 responseContent = ChannelBuffers.copiedBuffer(uri.query, CharsetUtil.UTF_8)
                 response = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.valueOf(endpoint.status))
                 response.setContent(responseContent)
                 break
               case REDIRECT:
+                responseContent = ChannelBuffers.EMPTY_BUFFER
                 response = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.valueOf(endpoint.status))
+                response.setContent(responseContent)
                 response.headers().set(LOCATION, endpoint.body)
                 break
               case EXCEPTION:
@@ -144,5 +154,10 @@ class Netty38ServerTest extends HttpServerTest<ServerBootstrap> implements Agent
   @Override
   String expectedServerSpanName(ServerEndpoint endpoint) {
     return "HTTP GET"
+  }
+
+  @Override
+  boolean testConcurrency() {
+    return true
   }
 }

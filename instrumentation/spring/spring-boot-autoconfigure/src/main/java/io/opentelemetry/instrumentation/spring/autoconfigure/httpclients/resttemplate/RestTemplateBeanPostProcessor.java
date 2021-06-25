@@ -5,19 +5,19 @@
 
 package io.opentelemetry.instrumentation.spring.autoconfigure.httpclients.resttemplate;
 
-import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.instrumentation.spring.httpclients.RestTemplateInterceptor;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.web.client.RestTemplate;
 
 final class RestTemplateBeanPostProcessor implements BeanPostProcessor {
+  private final ObjectProvider<OpenTelemetry> openTelemetryProvider;
 
-  private final Tracer tracer;
-
-  public RestTemplateBeanPostProcessor(Tracer tracer) {
-    this.tracer = tracer;
+  RestTemplateBeanPostProcessor(ObjectProvider<OpenTelemetry> openTelemetryProvider) {
+    this.openTelemetryProvider = openTelemetryProvider;
   }
 
   @Override
@@ -27,16 +27,19 @@ final class RestTemplateBeanPostProcessor implements BeanPostProcessor {
     }
 
     RestTemplate restTemplate = (RestTemplate) bean;
-    addRestTemplateInterceptorIfNotPresent(restTemplate);
+    OpenTelemetry openTelemetry = openTelemetryProvider.getIfUnique();
+    if (openTelemetry != null) {
+      addRestTemplateInterceptorIfNotPresent(restTemplate, openTelemetry);
+    }
     return restTemplate;
   }
 
-  private void addRestTemplateInterceptorIfNotPresent(RestTemplate restTemplate) {
-
+  private static void addRestTemplateInterceptorIfNotPresent(
+      RestTemplate restTemplate, OpenTelemetry openTelemetry) {
     List<ClientHttpRequestInterceptor> restTemplateInterceptors = restTemplate.getInterceptors();
     if (restTemplateInterceptors.stream()
         .noneMatch(interceptor -> interceptor instanceof RestTemplateInterceptor)) {
-      restTemplateInterceptors.add(0, new RestTemplateInterceptor(tracer));
+      restTemplateInterceptors.add(0, new RestTemplateInterceptor(openTelemetry));
     }
   }
 }

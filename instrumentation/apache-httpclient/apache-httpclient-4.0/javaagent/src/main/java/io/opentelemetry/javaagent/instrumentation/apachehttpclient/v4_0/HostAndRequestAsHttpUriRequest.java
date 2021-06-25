@@ -13,19 +13,20 @@ import org.apache.http.ProtocolVersion;
 import org.apache.http.RequestLine;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.message.AbstractHttpMessage;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Wraps HttpHost and HttpRequest into a HttpUriRequest for tracers and injectors. */
-public class HostAndRequestAsHttpUriRequest extends AbstractHttpMessage implements HttpUriRequest {
+public final class HostAndRequestAsHttpUriRequest extends AbstractHttpMessage
+    implements HttpUriRequest {
 
   private final String method;
   private final RequestLine requestLine;
   private final ProtocolVersion protocolVersion;
-  private final java.net.URI uri;
+  @Nullable private final URI uri;
 
   private final HttpRequest actualRequest;
 
   public HostAndRequestAsHttpUriRequest(HttpHost httpHost, HttpRequest httpRequest) {
-
     method = httpRequest.getRequestLine().getMethod();
     requestLine = httpRequest.getRequestLine();
     protocolVersion = requestLine.getProtocolVersion();
@@ -41,7 +42,7 @@ public class HostAndRequestAsHttpUriRequest extends AbstractHttpMessage implemen
   }
 
   @Override
-  public void abort() throws UnsupportedOperationException {
+  public void abort() {
     throw new UnsupportedOperationException();
   }
 
@@ -51,8 +52,8 @@ public class HostAndRequestAsHttpUriRequest extends AbstractHttpMessage implemen
   }
 
   @Override
-  public void addHeader(String name, String value) {
-    actualRequest.addHeader(name, value);
+  public void setHeader(String name, String value) {
+    actualRequest.setHeader(name, value);
   }
 
   @Override
@@ -71,11 +72,7 @@ public class HostAndRequestAsHttpUriRequest extends AbstractHttpMessage implemen
   }
 
   @Override
-  public java.net.URI getURI() {
+  public URI getURI() {
     return uri;
-  }
-
-  public HttpRequest getActualRequest() {
-    return actualRequest;
   }
 }

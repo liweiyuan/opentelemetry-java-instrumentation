@@ -6,7 +6,6 @@
 package io.opentelemetry.javaagent.muzzle
 
 import io.opentelemetry.javaagent.IntegrationTestUtils
-import io.opentelemetry.javaagent.instrumentation.api.SafeServiceLoader
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import spock.lang.Specification
@@ -18,8 +17,8 @@ class MuzzleBytecodeTransformTest extends Specification {
     List<Class> unMuzzledClasses = []
     List<Class> nonLazyFields = []
     List<Class> unInitFields = []
-    def instrumentationModuleClass = IntegrationTestUtils.getAgentClassLoader().loadClass("io.opentelemetry.javaagent.tooling.InstrumentationModule")
-    for (Object instrumenter : SafeServiceLoader.load(instrumentationModuleClass, IntegrationTestUtils.getAgentClassLoader())) {
+    def instrumentationModuleClass = IntegrationTestUtils.getAgentClassLoader().loadClass("io.opentelemetry.javaagent.extension.instrumentation.InstrumentationModule")
+    for (Object instrumenter : ServiceLoader.load(instrumentationModuleClass)) {
       if (!instrumentationModuleClass.isAssignableFrom(instrumenter.getClass())) {
         // muzzle only applies to default instrumenters
         continue
@@ -27,12 +26,12 @@ class MuzzleBytecodeTransformTest extends Specification {
       Field f
       Method m
       try {
-        f = instrumenter.getClass().getDeclaredField("muzzleReferenceMatcher")
+        f = instrumenter.getClass().getDeclaredField("muzzleReferences")
         f.setAccessible(true)
         if (f.get(instrumenter) != null) {
           nonLazyFields.add(instrumenter.getClass())
         }
-        m = instrumenter.getClass().getDeclaredMethod("getMuzzleReferenceMatcher")
+        m = instrumenter.getClass().getDeclaredMethod("getMuzzleReferences")
         m.setAccessible(true)
         m.invoke(instrumenter)
         if (f.get(instrumenter) == null) {

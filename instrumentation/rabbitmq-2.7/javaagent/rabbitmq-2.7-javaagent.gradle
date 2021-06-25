@@ -1,4 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
+plugins {
+  id("otel.javaagent-instrumentation")
+}
 
 muzzle {
   pass {
@@ -10,20 +12,18 @@ muzzle {
 }
 
 dependencies {
-  library group: 'com.rabbitmq', name: 'amqp-client', version: '2.7.0'
+  library "com.rabbitmq:amqp-client:2.7.0"
 
-  testLibrary group: 'org.springframework.amqp', name: 'spring-rabbit', version: '1.1.0.RELEASE'
-
-  testImplementation deps.testcontainers
-}
-
-configurations.testRuntime {
-  resolutionStrategy {
-    force group: 'com.rabbitmq', name: 'amqp-client', version: '2.7.0'
+  testLibrary ("org.springframework.amqp:spring-rabbit:1.1.0.RELEASE") {
+    exclude group: 'com.rabbitmq', module: 'amqp-client'
   }
+
+  testInstrumentation project(':instrumentation:reactor-3.1:javaagent')
+
+  testLibrary 'io.projectreactor.rabbitmq:reactor-rabbitmq:1.0.0.RELEASE'
 }
 
-tasks.withType(Test) {
+tasks.withType(Test).configureEach {
   // TODO run tests both with and without experimental span attributes
   jvmArgs "-Dotel.instrumentation.rabbitmq.experimental-span-attributes=true"
 }

@@ -20,6 +20,7 @@ public class DecoratorRegistry {
     Map<String, SpanDecorator> result = new HashMap<>();
     result.put("ahc", new HttpSpanDecorator());
     result.put("ampq", new MessagingSpanDecorator("ampq"));
+    result.put("aws-s3", new S3SpanDecorator());
     result.put("aws-sns", new MessagingSpanDecorator("aws-sns"));
     result.put("aws-sqs", new MessagingSpanDecorator("aws-sqs"));
     result.put("cometd", new MessagingSpanDecorator("cometd"));
@@ -57,7 +58,7 @@ public class DecoratorRegistry {
     return result;
   }
 
-  public SpanDecorator forComponent(final String component) {
+  public SpanDecorator forComponent(String component) {
 
     return DECORATORS.getOrDefault(component, DEFAULT);
   }

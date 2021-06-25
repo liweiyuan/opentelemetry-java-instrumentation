@@ -6,21 +6,23 @@
 package test.boot
 
 import static io.opentelemetry.api.trace.SpanKind.INTERNAL
-import static io.opentelemetry.api.trace.SpanKind.SERVER
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.AUTH_ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.LOGIN
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.NOT_FOUND
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.PATH_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.SUCCESS
 
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.instrumentation.test.AgentTestTrait
 import io.opentelemetry.instrumentation.test.asserts.TraceAssert
 import io.opentelemetry.instrumentation.test.base.HttpServerTest
 import io.opentelemetry.sdk.trace.data.SpanData
-import io.opentelemetry.semconv.trace.attributes.SemanticAttributes
-import okhttp3.FormBody
-import okhttp3.RequestBody
+import io.opentelemetry.testing.internal.armeria.common.AggregatedHttpRequest
+import io.opentelemetry.testing.internal.armeria.common.HttpData
+import io.opentelemetry.testing.internal.armeria.common.MediaType
+import io.opentelemetry.testing.internal.armeria.common.QueryParams
 import org.springframework.boot.SpringApplication
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.web.servlet.view.RedirectView
@@ -50,7 +52,7 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
   }
 
   @Override
-  boolean hasHandlerSpan() {
+  boolean hasHandlerSpan(ServerEndpoint endpoint) {
     true
   }
 
@@ -61,14 +63,7 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
 
   @Override
   boolean hasResponseSpan(ServerEndpoint endpoint) {
-    endpoint == REDIRECT
-  }
-
-  @Override
-  boolean testNotFound() {
-    // FIXME: the instrumentation adds an extra controller span which is not consistent.
-    // Fix tests or remove extra span.
-    false
+    endpoint == REDIRECT || endpoint == NOT_FOUND
   }
 
   @Override
@@ -76,25 +71,43 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
     true
   }
 
+  @Override
+  boolean hasErrorPageSpans(ServerEndpoint endpoint) {
+    endpoint == NOT_FOUND
+  }
+
+  @Override
+  String expectedServerSpanName(ServerEndpoint endpoint) {
+    switch (endpoint) {
+      case PATH_PARAM:
+        return getContextPath() + "/path/{id}/param"
+      case NOT_FOUND:
+        return getContextPath() + "/**"
+      case LOGIN:
+        return getContextPath() + "/*"
+      default:
+        return super.expectedServerSpanName(endpoint)
+    }
+  }
+
   def "test spans with auth error"() {
     setup:
     def authProvider = server.getBean(SavingAuthenticationProvider)
-    def request = request(AUTH_ERROR, "GET", null).build()
+    def request = request(AUTH_ERROR, "GET")
 
     when:
     authProvider.latestAuthentications.clear()
-    def response = client.newCall(request).execute()
+    def response = client.execute(request).aggregate().join()
 
     then:
-    response.code() == 401 // not secured
+    response.status().code() == 401 // not secured
 
     and:
     assertTraces(1) {
-      trace(0, 4) {
+      trace(0, 3) {
         serverSpan(it, 0, null, null, "GET", null, AUTH_ERROR)
         sendErrorSpan(it, 1, span(0))
-        forwardSpan(it, 2, span(0))
-        errorPageSpans(it, 3, null)
+        errorPageSpans(it, 2, null)
       }
     }
   }
@@ -103,24 +116,23 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
     setup:
     def authProvider = server.getBean(SavingAuthenticationProvider)
 
-    RequestBody formBody = new FormBody.Builder()
-      .add("username", "test")
-      .add("password", testPassword).build()
-
-    def request = request(LOGIN, "POST", formBody).build()
+    QueryParams form = QueryParams.of("username", "test", "password", testPassword)
+    def request = AggregatedHttpRequest.of(
+      request(LOGIN, "POST").headers().toBuilder().contentType(MediaType.FORM_DATA).build(),
+      HttpData.ofUtf8(form.toQueryString()))
 
     when:
     authProvider.latestAuthentications.clear()
-    def response = client.newCall(request).execute()
+    def response = client.execute(request).aggregate().join()
 
     then:
-    response.code() == 302 // redirect after success
+    response.status().code() == 302 // redirect after success
     authProvider.latestAuthentications.get(0).password == testPassword
 
     and:
     assertTraces(1) {
       trace(0, 2) {
-        serverSpan(it, 0, null, null, "POST", response.body()?.contentLength(), LOGIN)
+        serverSpan(it, 0, null, null, "POST", response.contentUtf8().length(), LOGIN)
         redirectSpan(it, 1, span(0))
       }
     }
@@ -134,7 +146,6 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
     trace.span(index) {
       name "BasicErrorController.error"
       kind INTERNAL
-      errored false
       attributes {
       }
     }
@@ -142,10 +153,10 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
 
   @Override
   void responseSpan(TraceAssert trace, int index, Object parent, String method = "GET", ServerEndpoint endpoint = SUCCESS) {
+    def responseSpanName = endpoint == NOT_FOUND ? "OnCommittedResponseWrapper.sendError" : "OnCommittedResponseWrapper.sendRedirect"
     trace.span(index) {
-      name "OnCommittedResponseWrapper.sendRedirect"
+      name responseSpanName
       kind INTERNAL
-      errored false
       attributes {
       }
     }
@@ -156,7 +167,6 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
     trace.span(index) {
       name "Render RedirectView"
       kind INTERNAL
-      errored false
       attributes {
         "spring-webmvc.view.type" RedirectView.simpleName
       }
@@ -165,53 +175,18 @@ class SpringBootBasedTest extends HttpServerTest<ConfigurableApplicationContext>
 
   @Override
   void handlerSpan(TraceAssert trace, int index, Object parent, String method = "GET", ServerEndpoint endpoint = SUCCESS) {
+    def handlerSpanName = "TestController.${endpoint.name().toLowerCase()}"
+    if (endpoint == NOT_FOUND) {
+      handlerSpanName = "ResourceHttpRequestHandler.handleRequest"
+    }
     trace.span(index) {
-      name "TestController.${endpoint.name().toLowerCase()}"
+      name handlerSpanName
       kind INTERNAL
-      errored endpoint == EXCEPTION
       if (endpoint == EXCEPTION) {
+        status StatusCode.ERROR
         errorEvent(Exception, EXCEPTION.body)
       }
       childOf((SpanData) parent)
-    }
-  }
-
-  // this override is needed because the exception is propagated up from the handler span
-  // to the server span, which is different from the the expectation of the super method
-  @Override
-  void serverSpan(TraceAssert trace, int index, String traceID = null, String parentID = null, String method = "GET", Long responseContentLength = null, ServerEndpoint endpoint = SUCCESS) {
-
-    trace.span(index) {
-      if (endpoint == PATH_PARAM) {
-        name getContextPath() + "/path/{id}/param"
-      } else if (endpoint == AUTH_ERROR) {
-        name getContextPath() + "/error"
-      } else if (endpoint == LOGIN) {
-        name 'HTTP POST'
-      } else {
-        name endpoint.resolvePath(address).path
-      }
-      kind SERVER
-      errored endpoint.errored
-      if (parentID != null) {
-        traceId traceID
-        parentSpanId parentID
-      } else {
-        hasNoParent()
-      }
-      if (endpoint == EXCEPTION) {
-        errorEvent(Exception, EXCEPTION.body)
-      }
-      attributes {
-        "${SemanticAttributes.NET_PEER_IP.key}" "127.0.0.1"
-        "${SemanticAttributes.NET_PEER_PORT.key}" Long
-        "${SemanticAttributes.HTTP_URL.key}" { it == "${endpoint.resolve(address)}" || it == "${endpoint.resolveWithoutFragment(address)}" }
-        "${SemanticAttributes.HTTP_METHOD.key}" method
-        "${SemanticAttributes.HTTP_STATUS_CODE.key}" endpoint.status
-        "${SemanticAttributes.HTTP_FLAVOR.key}" "1.1"
-        "${SemanticAttributes.HTTP_USER_AGENT.key}" TEST_USER_AGENT
-        "${SemanticAttributes.HTTP_CLIENT_IP.key}" TEST_CLIENT_IP
-      }
     }
   }
 }

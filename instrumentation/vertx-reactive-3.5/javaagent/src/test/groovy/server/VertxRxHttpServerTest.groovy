@@ -7,6 +7,8 @@ package server
 
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.INDEXED_CHILD
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.NOT_FOUND
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.PATH_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.QUERY_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
@@ -39,7 +41,7 @@ class VertxRxHttpServerTest extends HttpServerTest<Vertx> implements AgentTestTr
         .setConfig(new JsonObject().put(CONFIG_HTTP_SERVER_PORT, port))
         .setInstances(3)) { res ->
       if (!res.succeeded()) {
-        throw new RuntimeException("Cannot deploy server Verticle", res.cause())
+        throw new IllegalStateException("Cannot deploy server Verticle", res.cause())
       }
       future.complete(null)
     }
@@ -54,24 +56,25 @@ class VertxRxHttpServerTest extends HttpServerTest<Vertx> implements AgentTestTr
   }
 
   @Override
-  boolean testException() {
-    // https://github.com/open-telemetry/opentelemetry-java-instrumentation/issues/807
-    return false
-  }
-
-  @Override
   boolean testPathParam() {
     return true
   }
 
   @Override
-  boolean testNotFound() {
-    return false
+  String expectedServerSpanName(ServerEndpoint endpoint) {
+    switch (endpoint) {
+      case PATH_PARAM:
+        return "/path/:id/param"
+      case NOT_FOUND:
+        return "HTTP GET"
+      default:
+        return endpoint.getPath()
+    }
   }
 
   @Override
-  String expectedServerSpanName(ServerEndpoint endpoint) {
-    return endpoint == PATH_PARAM ? "/path/:id/param" : endpoint.getPath()
+  boolean testConcurrency() {
+    return true
   }
 
   protected Class<AbstractVerticle> verticle() {
@@ -88,6 +91,12 @@ class VertxRxHttpServerTest extends HttpServerTest<Vertx> implements AgentTestTr
       router.route(SUCCESS.path).handler { ctx ->
         controller(SUCCESS) {
           ctx.response().setStatusCode(SUCCESS.status).end(SUCCESS.body)
+        }
+      }
+      router.route(INDEXED_CHILD.path).handler { ctx ->
+        controller(INDEXED_CHILD) {
+          INDEXED_CHILD.collectSpanAttributes { ctx.request().params().get(it) }
+          ctx.response().setStatusCode(INDEXED_CHILD.status).end()
         }
       }
       router.route(QUERY_PARAM.path).handler { ctx ->

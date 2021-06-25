@@ -13,6 +13,7 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
 import io.opentelemetry.extension.aws.AwsXrayPropagator;
 import io.opentelemetry.instrumentation.api.tracer.HttpClientTracer;
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes;
 import java.net.URI;
 import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.interceptor.SdkExecutionAttribute;
@@ -24,16 +25,16 @@ final class AwsSdkHttpClientTracer
     extends HttpClientTracer<SdkHttpRequest, SdkHttpRequest.Builder, SdkHttpResponse> {
 
   AwsSdkHttpClientTracer(OpenTelemetry openTelemetry) {
-    super(openTelemetry);
+    super(openTelemetry, new NetPeerAttributes());
   }
 
   public Context startSpan(Context parentContext, ExecutionAttributes attributes) {
     String spanName = spanName(attributes);
-    Span span =
-        tracer.spanBuilder(spanName).setSpanKind(CLIENT).setParent(parentContext).startSpan();
+    Span span = spanBuilder(parentContext, spanName, CLIENT).startSpan();
     return withClientSpan(parentContext, span);
   }
 
+  @Override
   public void inject(Context context, SdkHttpRequest.Builder builder) {
     AwsXrayPropagator.getInstance().inject(context, builder, getSetter());
   }

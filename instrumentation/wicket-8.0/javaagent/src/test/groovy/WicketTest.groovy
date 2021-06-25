@@ -3,16 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import static io.opentelemetry.instrumentation.test.utils.TraceUtils.basicSpan
+import static io.opentelemetry.instrumentation.test.utils.TraceUtils.basicServerSpan
 
 import hello.HelloApplication
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
 import io.opentelemetry.instrumentation.test.base.HttpServerTestTrait
+import io.opentelemetry.testing.internal.armeria.common.AggregatedHttpResponse
 import javax.servlet.DispatcherType
-import okhttp3.HttpUrl
-import okhttp3.Request
-import okhttp3.RequestBody
-import okhttp3.Response
 import org.apache.wicket.protocol.http.WicketFilter
 import org.eclipse.jetty.server.Server
 import org.eclipse.jetty.servlet.DefaultServlet
@@ -55,43 +52,31 @@ class WicketTest extends AgentInstrumentationSpecification implements HttpServer
 
   def "test hello"() {
     setup:
-    def url = HttpUrl.get(address.resolve("wicket-test/")).newBuilder().build()
-    def request = request(url, "GET", null).build()
-    Response response = client.newCall(request).execute()
-    def doc = Jsoup.parse(response.body().string())
+    AggregatedHttpResponse response = client.get(address.resolve("wicket-test/").toString()).aggregate().join()
+    def doc = Jsoup.parse(response.contentUtf8())
 
     expect:
-    response.code() == 200
+    response.status().code() == 200
     doc.selectFirst("#message").text() == "Hello World!"
 
     assertTraces(1) {
       trace(0, 1) {
-        basicSpan(it, 0, getContextPath() + "/wicket-test/hello.HelloPage")
+        basicServerSpan(it, 0, getContextPath() + "/wicket-test/hello.HelloPage")
       }
     }
   }
 
   def "test exception"() {
     setup:
-    def url = HttpUrl.get(address.resolve("wicket-test/exception")).newBuilder().build()
-    def request = request(url, "GET", null).build()
-    Response response = client.newCall(request).execute()
+    AggregatedHttpResponse response = client.get(address.resolve("wicket-test/exception").toString()).aggregate().join()
 
     expect:
-    response.code() == 500
+    response.status().code() == 500
 
     assertTraces(1) {
       trace(0, 1) {
-        basicSpan(it, 0, getContextPath() + "/wicket-test/org.apache.wicket.markup.html.pages.InternalErrorPage", null, new Exception("test exception"))
+        basicServerSpan(it, 0, getContextPath() + "/wicket-test/hello.ExceptionPage", null, new Exception("test exception"))
       }
     }
-  }
-
-  Request.Builder request(HttpUrl url, String method, RequestBody body) {
-    return new Request.Builder()
-      .url(url)
-      .method(method, body)
-      .header("User-Agent", TEST_USER_AGENT)
-      .header("X-Forwarded-For", TEST_CLIENT_IP)
   }
 }

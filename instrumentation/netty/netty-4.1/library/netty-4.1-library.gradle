@@ -1,5 +1,7 @@
-apply from: "$rootDir/gradle/instrumentation-library.gradle"
+plugins {
+  id("otel.library-instrumentation")
+}
 
 dependencies {
-  compileOnly group: 'io.netty', name: 'netty-codec-http', version: '4.1.0.Final'
+  compileOnly "io.netty:netty-codec-http:4.1.0.Final"
 }

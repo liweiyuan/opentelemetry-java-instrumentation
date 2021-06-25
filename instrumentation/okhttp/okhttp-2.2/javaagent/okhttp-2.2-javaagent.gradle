@@ -1,4 +1,6 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
+plugins {
+  id("otel.javaagent-instrumentation")
+}
 
 /*
 Note: The Interceptor class for OkHttp was not introduced until 2.2+, so we need to make sure the
@@ -14,9 +16,7 @@ muzzle {
 }
 
 dependencies {
-  library(group: 'com.squareup.okhttp', name: 'okhttp', version: '2.2.0')
+  library("com.squareup.okhttp:okhttp:2.2.0")
 
-  latestDepTestLibrary group: 'com.squareup.okhttp', name: 'okhttp', version: '[2.6,3)'
+  latestDepTestLibrary "com.squareup.okhttp:okhttp:[2.6,3)"
 }
-
-

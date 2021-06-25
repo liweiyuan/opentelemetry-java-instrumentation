@@ -5,14 +5,12 @@
 
 import static io.opentelemetry.sdk.metrics.data.MetricDataType.DOUBLE_GAUGE
 import static io.opentelemetry.sdk.metrics.data.MetricDataType.DOUBLE_SUM
-import static io.opentelemetry.sdk.metrics.data.MetricDataType.LONG_GAUGE
-import static io.opentelemetry.sdk.metrics.data.MetricDataType.LONG_SUM
 import static io.opentelemetry.sdk.metrics.data.MetricDataType.SUMMARY
 import static java.util.concurrent.TimeUnit.SECONDS
 
 import com.google.common.base.Stopwatch
 import io.opentelemetry.api.metrics.AsynchronousInstrument
-import io.opentelemetry.api.metrics.GlobalMetricsProvider
+import io.opentelemetry.api.metrics.GlobalMeterProvider
 import io.opentelemetry.api.metrics.common.Labels
 import io.opentelemetry.instrumentation.test.AgentInstrumentationSpecification
 import io.opentelemetry.sdk.metrics.data.MetricData
@@ -27,7 +25,7 @@ class MeterTest extends AgentInstrumentationSpecification {
     def instrumentationName = "test" + new Random().nextLong()
 
     when:
-    def meter = GlobalMetricsProvider.getMeter(instrumentationName, "1.2.3")
+    def meter = GlobalMeterProvider.getMeter(instrumentationName, "1.2.3")
     def instrument = meter."$builderMethod"("test")
       .setDescription("d")
       .setUnit("u")
@@ -62,10 +60,10 @@ class MeterTest extends AgentInstrumentationSpecification {
 
     where:
     builderMethod                | bind  | value1 | value2 | expectedValue | expectedType
-    "longCounterBuilder"         | false | 5      | 6      | 11            | LONG_SUM
-    "longCounterBuilder"         | true  | 5      | 6      | 11            | LONG_SUM
-    "longUpDownCounterBuilder"   | false | 5      | 6      | 11            | LONG_SUM
-    "longUpDownCounterBuilder"   | true  | 5      | 6      | 11            | LONG_SUM
+    "longCounterBuilder"         | false | 5      | 6      | 11            | DOUBLE_SUM
+    "longCounterBuilder"         | true  | 5      | 6      | 11            | DOUBLE_SUM
+    "longUpDownCounterBuilder"   | false | 5      | 6      | 11            | DOUBLE_SUM
+    "longUpDownCounterBuilder"   | true  | 5      | 6      | 11            | DOUBLE_SUM
     "doubleCounterBuilder"       | false | 5.5    | 6.6    | 12.1          | DOUBLE_SUM
     "doubleCounterBuilder"       | true  | 5.5    | 6.6    | 12.1          | DOUBLE_SUM
     "doubleUpDownCounterBuilder" | false | 5.5    | 6.6    | 12.1          | DOUBLE_SUM
@@ -78,7 +76,7 @@ class MeterTest extends AgentInstrumentationSpecification {
     def instrumentationName = "test" + new Random().nextLong()
 
     when:
-    def meter = GlobalMetricsProvider.getMeter(instrumentationName, "1.2.3")
+    def meter = GlobalMeterProvider.getMeter(instrumentationName, "1.2.3")
     def instrument = meter."$builderMethod"("test")
       .setDescription("d")
       .setUnit("u")
@@ -124,7 +122,7 @@ class MeterTest extends AgentInstrumentationSpecification {
     def instrumentationName = "test" + new Random().nextLong()
 
     when:
-    def meter = GlobalMetricsProvider.getMeter(instrumentationName, "1.2.3")
+    def meter = GlobalMeterProvider.getMeter(instrumentationName, "1.2.3")
     def instrument = meter."$builderMethod"("test")
       .setDescription("d")
       .setUnit("u")
@@ -183,7 +181,6 @@ class MeterTest extends AgentInstrumentationSpecification {
     metricData.instrumentationLibraryInfo.version == "1.2.3"
     points(metricData).size() == 1
     def point = points(metricData).iterator().next()
-    point.labels == Labels.of("q", "r")
     if (builderMethod.startsWith("long")) {
       point.value == 123
     } else {
@@ -192,9 +189,9 @@ class MeterTest extends AgentInstrumentationSpecification {
 
     where:
     builderMethod                    | valueMethod | expectedType
-    "longSumObserverBuilder"         | "value"     | LONG_SUM
-    "longUpDownSumObserverBuilder"   | "value"     | LONG_SUM
-    "longValueObserverBuilder"       | "sum"       | LONG_GAUGE
+    "longSumObserverBuilder"         | "value"     | DOUBLE_SUM
+    "longUpDownSumObserverBuilder"   | "value"     | DOUBLE_SUM
+    "longValueObserverBuilder"       | "sum"       | DOUBLE_GAUGE
     "doubleSumObserverBuilder"       | "value"     | DOUBLE_SUM
     "doubleUpDownSumObserverBuilder" | "value"     | DOUBLE_SUM
     "doubleValueObserverBuilder"     | "sum"       | DOUBLE_GAUGE
@@ -206,7 +203,7 @@ class MeterTest extends AgentInstrumentationSpecification {
     def instrumentationName = "test" + new Random().nextLong()
 
     when:
-    def meter = GlobalMetricsProvider.getMeter(instrumentationName, "1.2.3")
+    def meter = GlobalMeterProvider.getMeter(instrumentationName, "1.2.3")
     def longCounter = meter.longCounterBuilder("test")
       .setDescription("d")
       .setUnit("u")
@@ -228,12 +225,11 @@ class MeterTest extends AgentInstrumentationSpecification {
     metricData != null
     metricData.description == "d"
     metricData.unit == "u"
-    metricData.type == LONG_SUM
+    metricData.type == DOUBLE_SUM
     metricData.instrumentationLibraryInfo.name == instrumentationName
     metricData.instrumentationLibraryInfo.version == "1.2.3"
     points(metricData).size() == 1
     def point = points(metricData).iterator().next()
-    point.labels == Labels.of("q", "r")
     point.value == 11
 
     def metricData2 = findMetric(instrumentationName, "test2")
@@ -245,7 +241,6 @@ class MeterTest extends AgentInstrumentationSpecification {
     metricData2.instrumentationLibraryInfo.version == "1.2.3"
     points(metricData2).size() == 1
     def point2 = points(metricData2).iterator().next()
-    point2.labels == Labels.of("q", "r")
     point2.count == 2
     point2.sum == 12.1
   }
@@ -264,6 +259,7 @@ class MeterTest extends AgentInstrumentationSpecification {
   List<PointData> points(MetricData metricData) {
     def points = []
     points.addAll(metricData.getDoubleGaugeData().getPoints())
+    points.addAll(metricData.getDoubleHistogramData().getPoints())
     points.addAll(metricData.getDoubleSumData().getPoints())
     points.addAll(metricData.getDoubleSummaryData().getPoints())
     points.addAll(metricData.getLongGaugeData().getPoints())

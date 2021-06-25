@@ -5,19 +5,20 @@
 
 package io.opentelemetry.javaagent.instrumentation.couchbase.v2_0;
 
-import io.opentelemetry.javaagent.instrumentation.api.db.SqlStatementInfo;
-import io.opentelemetry.javaagent.instrumentation.api.db.SqlStatementSanitizer;
+import io.opentelemetry.instrumentation.api.db.SqlStatementInfo;
+import io.opentelemetry.instrumentation.api.db.SqlStatementSanitizer;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public final class CouchbaseQuerySanitizer {
-  private static final Class<?> QUERY_CLASS;
-  private static final Class<?> STATEMENT_CLASS;
-  private static final Class<?> N1QL_QUERY_CLASS;
-  private static final MethodHandle N1QL_GET_STATEMENT;
-  private static final Class<?> ANALYTICS_QUERY_CLASS;
-  private static final MethodHandle ANALYTICS_GET_STATEMENT;
+  @Nullable private static final Class<?> QUERY_CLASS;
+  @Nullable private static final Class<?> STATEMENT_CLASS;
+  @Nullable private static final Class<?> N1QL_QUERY_CLASS;
+  @Nullable private static final MethodHandle N1QL_GET_STATEMENT;
+  @Nullable private static final Class<?> ANALYTICS_QUERY_CLASS;
+  @Nullable private static final MethodHandle ANALYTICS_GET_STATEMENT;
 
   static {
     Class<?> queryClass;
@@ -75,15 +76,15 @@ public final class CouchbaseQuerySanitizer {
     }
     // Query is present in Couchbase [2.0.0, 2.2.0)
     // Statement is present starting from Couchbase 2.1.0
-    if (QUERY_CLASS != null && QUERY_CLASS.isAssignableFrom(query.getClass())
-        || STATEMENT_CLASS != null && STATEMENT_CLASS.isAssignableFrom(query.getClass())) {
+    if ((QUERY_CLASS != null && QUERY_CLASS.isAssignableFrom(query.getClass()))
+        || (STATEMENT_CLASS != null && STATEMENT_CLASS.isAssignableFrom(query.getClass()))) {
       return sanitizeString(query.toString());
     }
     // SpatialViewQuery is present starting from Couchbase 2.1.0
     String queryClassName = query.getClass().getName();
     if (queryClassName.equals("com.couchbase.client.java.view.ViewQuery")
         || queryClassName.equals("com.couchbase.client.java.view.SpatialViewQuery")) {
-      return new SqlStatementInfo(query.toString(), null, null);
+      return SqlStatementInfo.create(query.toString(), null, null);
     }
     // N1qlQuery is present starting from Couchbase 2.2.0
     if (N1QL_QUERY_CLASS != null && N1QL_QUERY_CLASS.isAssignableFrom(query.getClass())) {
@@ -99,7 +100,7 @@ public final class CouchbaseQuerySanitizer {
         return sanitizeString(statement);
       }
     }
-    return new SqlStatementInfo(query.getClass().getSimpleName(), null, null);
+    return SqlStatementInfo.create(query.getClass().getSimpleName(), null, null);
   }
 
   private static String getStatementString(MethodHandle handle, Object query) {

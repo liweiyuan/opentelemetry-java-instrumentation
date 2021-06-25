@@ -4,6 +4,7 @@
  */
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 import static io.opentelemetry.instrumentation.test.utils.TraceUtils.runUnderTrace
 import static org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING
 
@@ -14,9 +15,7 @@ import org.elasticsearch.action.admin.cluster.settings.ClusterUpdateSettingsRequ
 import org.elasticsearch.common.io.FileSystemUtils
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.index.IndexNotFoundException
-import org.elasticsearch.node.InternalSettingsPreparer
 import org.elasticsearch.node.Node
-import org.elasticsearch.transport.Netty4Plugin
 import spock.lang.Shared
 
 class Elasticsearch6NodeClientTest extends AgentInstrumentationSpecification {
@@ -44,7 +43,7 @@ class Elasticsearch6NodeClientTest extends AgentInstrumentationSpecification {
       .put(CLUSTER_NAME_SETTING.getKey(), clusterName)
       .put("discovery.type", "single-node")
       .build()
-    testNode = new Node(InternalSettingsPreparer.prepareEnvironment(settings, null), [Netty4Plugin])
+    testNode = NodeFactory.newNode(settings)
     testNode.start()
     runUnderTrace("setup") {
       // this may potentially create multiple requests and therefore multiple spans, so we wrap this call
@@ -68,10 +67,10 @@ class Elasticsearch6NodeClientTest extends AgentInstrumentationSpecification {
     setup:
     def result = client.admin().cluster().health(new ClusterHealthRequest()).get()
 
-    def status = result.status
+    def clusterHealthStatus = result.status
 
     expect:
-    status.name() == "GREEN"
+    clusterHealthStatus.name() == "GREEN"
 
     assertTraces(1) {
       trace(0, 1) {
@@ -102,8 +101,8 @@ class Elasticsearch6NodeClientTest extends AgentInstrumentationSpecification {
         span(0) {
           name "GetAction"
           kind CLIENT
-          errored true
-          errorEvent IndexNotFoundException, "no such index"
+          status ERROR
+          errorEvent IndexNotFoundException, ~/no such index( \[invalid-index])?/
           attributes {
             "${SemanticAttributes.DB_SYSTEM.key}" "elasticsearch"
             "${SemanticAttributes.DB_OPERATION.key}" "GetAction"
@@ -205,13 +204,13 @@ class Elasticsearch6NodeClientTest extends AgentInstrumentationSpecification {
           }
         }
         span(1) {
-          name "PutMappingAction"
+          name ~/(Auto)?PutMappingAction/
           kind CLIENT
           childOf span(0)
           attributes {
             "${SemanticAttributes.DB_SYSTEM.key}" "elasticsearch"
-            "${SemanticAttributes.DB_OPERATION.key}" "PutMappingAction"
-            "elasticsearch.action" "PutMappingAction"
+            "${SemanticAttributes.DB_OPERATION.key}" ~/(Auto)?PutMappingAction/
+            "elasticsearch.action" ~/(Auto)?PutMappingAction/
             "elasticsearch.request" "PutMappingRequest"
           }
         }

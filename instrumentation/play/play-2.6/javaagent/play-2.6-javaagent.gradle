@@ -1,9 +1,6 @@
-ext {
-  // Play doesn't work with Java 9+ until 2.6.12
-  maxJavaVersionForTests = JavaVersion.VERSION_1_8
+plugins {
+  id("otel.javaagent-instrumentation")
 }
-
-apply from: "$rootDir/gradle/instrumentation.gradle"
 
 def scalaVersion = '2.11'
 def playVersion = '2.6.0'
@@ -14,6 +11,9 @@ muzzle {
     module = "play_$scalaVersion"
     versions = "[$playVersion,)"
     assertInverse = true
+    // versions 2.3.9 and 2.3.10 depends on com.typesafe.netty:netty-http-pipelining:1.1.2
+    // which does not exist
+    skip('2.3.9', '2.3.10')
   }
   pass {
     group = 'com.typesafe.play'
@@ -29,6 +29,11 @@ muzzle {
   }
 }
 
+otelJava {
+  // Play doesn't work with Java 9+ until 2.6.12
+  maxJavaVersionForTests = JavaVersion.VERSION_1_8
+}
+
 dependencies {
   // TODO(anuraaga): Something about library configuration doesn't work well with scala compilation
   // here.
@@ -36,6 +41,7 @@ dependencies {
 
   testInstrumentation project(':instrumentation:netty:netty-4.0:javaagent')
   testInstrumentation project(':instrumentation:netty:netty-4.1:javaagent')
+  testInstrumentation project(':instrumentation:akka-actor-2.5:javaagent')
   testInstrumentation project(':instrumentation:akka-http-10.0:javaagent')
 
   testLibrary group: 'com.typesafe.play', name: "play-java_$scalaVersion", version: playVersion

@@ -8,7 +8,7 @@ package io.opentelemetry.instrumentation.spring.autoconfigure.httpclients.webcli
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.instrumentation.spring.autoconfigure.TracerAutoConfiguration;
+import io.opentelemetry.instrumentation.spring.autoconfigure.OpenTelemetryAutoConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,7 @@ class WebClientAutoConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(
               AutoConfigurations.of(
-                  TracerAutoConfiguration.class, WebClientAutoConfiguration.class));
+                  OpenTelemetryAutoConfiguration.class, WebClientAutoConfiguration.class));
 
   @AfterEach
   void tearDown() {
@@ -33,14 +33,13 @@ class WebClientAutoConfigurationTest {
   @DisplayName("when httpclients are ENABLED should initialize WebClientBeanPostProcessor bean")
   void httpClientsEnabled() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.httpclients.enabled=true")
+        .withPropertyValues("otel.springboot.httpclients.enabled=true")
         .run(
-            (context) -> {
-              assertThat(
-                      context.getBean(
-                          "otelWebClientBeanPostProcessor", WebClientBeanPostProcessor.class))
-                  .isNotNull();
-            });
+            context ->
+                assertThat(
+                        context.getBean(
+                            "otelWebClientBeanPostProcessor", WebClientBeanPostProcessor.class))
+                    .isNotNull());
   }
 
   @Test
@@ -48,11 +47,10 @@ class WebClientAutoConfigurationTest {
       "when httpclients are DISABLED should NOT initialize WebClientBeanPostProcessor bean")
   void disabledProperty() {
     this.contextRunner
-        .withPropertyValues("opentelemetry.trace.httpclients.enabled=false")
+        .withPropertyValues("otel.springboot.httpclients.enabled=false")
         .run(
-            (context) -> {
-              assertThat(context.containsBean("otelWebClientBeanPostProcessor")).isFalse();
-            });
+            context ->
+                assertThat(context.containsBean("otelWebClientBeanPostProcessor")).isFalse());
   }
 
   @Test
@@ -60,11 +58,10 @@ class WebClientAutoConfigurationTest {
       "when httpclients enabled property is MISSING should initialize WebClientBeanPostProcessor bean")
   void noProperty() {
     this.contextRunner.run(
-        (context) -> {
-          assertThat(
-                  context.getBean(
-                      "otelWebClientBeanPostProcessor", WebClientBeanPostProcessor.class))
-              .isNotNull();
-        });
+        context ->
+            assertThat(
+                    context.getBean(
+                        "otelWebClientBeanPostProcessor", WebClientBeanPostProcessor.class))
+                .isNotNull());
   }
 }

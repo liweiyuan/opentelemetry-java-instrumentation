@@ -6,6 +6,7 @@
 package io.opentelemetry.instrumentation.awslambda.v1_0
 
 import static io.opentelemetry.api.trace.SpanKind.SERVER
+import static io.opentelemetry.api.trace.StatusCode.ERROR
 
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestStreamHandler
@@ -49,8 +50,7 @@ class TracingRequestStreamWrapperPropagationTest extends LibraryInstrumentationS
 
   def setup() {
     environmentVariables.set(WrappedLambda.OTEL_LAMBDA_HANDLER_ENV_KEY, "io.opentelemetry.instrumentation.awslambda.v1_0.TracingRequestStreamWrapperPropagationTest\$TestRequestHandler::handleRequest")
-    TracingRequestStreamWrapper.WRAPPED_LAMBDA = WrappedLambda.fromConfiguration()
-    wrapper = new TracingRequestStreamWrapper(testRunner().openTelemetrySdk)
+    wrapper = new TracingRequestStreamWrapper(testRunner().openTelemetrySdk, WrappedLambda.fromConfiguration())
   }
 
   def cleanup() {
@@ -121,7 +121,7 @@ class TracingRequestStreamWrapperPropagationTest extends LibraryInstrumentationS
           traceId("4fd0b6131f19f39af59518d127b0cafe")
           name("my_function")
           kind SERVER
-          errored true
+          status ERROR
           errorEvent(IllegalArgumentException, "bad argument")
           attributes {
             "${SemanticAttributes.FAAS_EXECUTION.key}" "1-22-333"

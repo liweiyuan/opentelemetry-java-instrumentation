@@ -1,5 +1,7 @@
-apply from: "$rootDir/gradle/instrumentation.gradle"
-apply plugin: 'org.unbroken-dome.test-sets'
+plugins {
+  id("otel.javaagent-instrumentation")
+  id("org.unbroken-dome.test-sets")
+}
 
 // compiling against 1.11.0, but instrumentation should work against 1.10.33 with varying effects,
 // depending on the version's implementation. (i.e. DeleteOptionGroup may have less handlerCounts than
@@ -33,7 +35,8 @@ testSets {
   }
 
   // We test SQS separately since we have special logic for it and want to make sure the presence of
-  // SQS on the classpath doesn't conflict with tests for usage of the core SDK.
+  // SQS on the classpath doesn't conflict with tests for usage of the core SDK. This only affects
+  // the agent.
   testSqs
 }
 
@@ -50,37 +53,41 @@ configurations {
 }
 
 dependencies {
-  compileOnly deps.opentelemetryExtAws
+  compileOnly "io.opentelemetry:opentelemetry-extension-aws"
 
-  library group: 'com.amazonaws', name: 'aws-java-sdk-core', version: '1.11.0'
+  implementation project(':instrumentation:aws-sdk:aws-sdk-1.11:library')
 
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.106'
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-rds', version: '1.11.106'
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-ec2', version: '1.11.106'
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-kinesis', version: '1.11.106'
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-dynamodb', version: '1.11.106'
-  testLibrary group: 'com.amazonaws', name: 'aws-java-sdk-sns', version: '1.11.106'
+  library "com.amazonaws:aws-java-sdk-core:1.11.0"
 
-  testSqsImplementation group: 'com.amazonaws', name: 'aws-java-sdk-sqs', version: '1.11.106'
-  // needed for SQS - using emq directly as localstack references emq v0.15.7 ie WITHOUT AWS trace header propagation
-  testSqsImplementation group: 'org.elasticmq', name: 'elasticmq-rest-sqs_2.12', version: '1.0.0'
+  testLibrary "com.amazonaws:aws-java-sdk-s3:1.11.106"
+  testLibrary "com.amazonaws:aws-java-sdk-rds:1.11.106"
+  testLibrary "com.amazonaws:aws-java-sdk-ec2:1.11.106"
+  testLibrary "com.amazonaws:aws-java-sdk-kinesis:1.11.106"
+  testLibrary "com.amazonaws:aws-java-sdk-dynamodb:1.11.106"
+  testLibrary "com.amazonaws:aws-java-sdk-sns:1.11.106"
+
+  testImplementation project(':instrumentation:aws-sdk:aws-sdk-1.11:testing')
+
+  testSqsImplementation "com.amazonaws:aws-java-sdk-sqs:1.11.106"
 
   // Include httpclient instrumentation for testing because it is a dependency for aws-sdk.
   testInstrumentation project(':instrumentation:apache-httpclient:apache-httpclient-4.0:javaagent')
 
   // needed for kinesis:
-  testImplementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-cbor', version: versions.jackson
+  testImplementation "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor"
 
   // needed for SNS
-  testImplementation deps.testcontainers
-  testImplementation "org.testcontainers:localstack:${versions.testcontainers}"
+  testImplementation "org.testcontainers:localstack:${versions["org.testcontainers"]}"
 
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.0')
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-rds', version: '1.11.0')
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-ec2', version: '1.11.0')
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-kinesis', version: '1.11.0')
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-dynamodb', version: '1.11.0')
-  test_before_1_11_106Implementation(group: 'com.amazonaws', name: 'aws-java-sdk-sns', version: '1.11.0')
+  // needed by S3
+  testImplementation 'javax.xml.bind:jaxb-api:2.3.1'
+
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-s3:1.11.0")
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-rds:1.11.0")
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-ec2:1.11.0")
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-kinesis:1.11.0")
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-dynamodb:1.11.0")
+  test_before_1_11_106Implementation("com.amazonaws:aws-java-sdk-sns:1.11.0")
 }
 
 test {
@@ -91,7 +98,7 @@ if (!testLatestDeps) {
   check.dependsOn test_before_1_11_106, testSqs
 }
 
-tasks.withType(Test) {
+tasks.withType(Test).configureEach {
   // TODO run tests both with and without experimental span attributes
   jvmArgs "-Dotel.instrumentation.aws-sdk.experimental-span-attributes=true"
 }

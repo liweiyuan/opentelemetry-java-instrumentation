@@ -6,15 +6,16 @@
 package io.opentelemetry.instrumentation.api.tracer;
 
 import static io.opentelemetry.api.trace.SpanKind.CLIENT;
+import static io.opentelemetry.semconv.trace.attributes.SemanticAttributes.NetTransportValues.IP_TCP;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.SpanKind;
-import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
-import io.opentelemetry.instrumentation.api.tracer.utils.NetPeerUtils;
+import io.opentelemetry.instrumentation.api.tracer.net.NetPeerAttributes;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -31,23 +32,16 @@ public abstract class HttpClientTracer<REQUEST, CARRIER, RESPONSE> extends BaseT
 
   protected static final String USER_AGENT = "User-Agent";
 
-  protected HttpClientTracer() {
+  protected final NetPeerAttributes netPeerAttributes;
+
+  protected HttpClientTracer(NetPeerAttributes netPeerAttributes) {
     super();
+    this.netPeerAttributes = netPeerAttributes;
   }
 
-  /**
-   * Prefer to pass in an OpenTelemetry instance, rather than just a Tracer, so you don't have to
-   * use the GlobalOpenTelemetry Propagator instance.
-   *
-   * @deprecated prefer to pass in an OpenTelemetry instance, instead.
-   */
-  @Deprecated
-  protected HttpClientTracer(Tracer tracer) {
-    super(tracer);
-  }
-
-  protected HttpClientTracer(OpenTelemetry openTelemetry) {
+  protected HttpClientTracer(OpenTelemetry openTelemetry, NetPeerAttributes netPeerAttributes) {
     super(openTelemetry);
+    this.netPeerAttributes = netPeerAttributes;
   }
 
   protected abstract String method(REQUEST request);
@@ -139,28 +133,39 @@ public abstract class HttpClientTracer<REQUEST, CARRIER, RESPONSE> extends BaseT
 
   private Span internalStartSpan(
       SpanKind kind, Context parentContext, REQUEST request, String name, long startTimeNanos) {
-    SpanBuilder spanBuilder = tracer.spanBuilder(name).setSpanKind(kind).setParent(parentContext);
+    SpanBuilder spanBuilder = spanBuilder(parentContext, name, kind);
     if (startTimeNanos > 0) {
       spanBuilder.setStartTimestamp(startTimeNanos, TimeUnit.NANOSECONDS);
     }
-    Span span = spanBuilder.startSpan();
-    onRequest(span, request);
-    return span;
+    onRequest(spanBuilder, request);
+    return spanBuilder.startSpan();
   }
 
-  protected void onRequest(Span span, REQUEST request) {
-    assert span != null;
-    if (request != null) {
-      span.setAttribute(SemanticAttributes.NET_TRANSPORT, "IP.TCP");
-      span.setAttribute(SemanticAttributes.HTTP_METHOD, method(request));
-      span.setAttribute(SemanticAttributes.HTTP_USER_AGENT, requestHeader(request, USER_AGENT));
+  protected void onRequest(SpanBuilder spanBuilder, REQUEST request) {
+    onRequest(spanBuilder::setAttribute, request);
+  }
 
-      setFlavor(span, request);
-      setUrl(span, request);
+  /**
+   * This method should only be used when the request is not yet available when {@link #startSpan}
+   * is called. Otherwise {@link #onRequest(SpanBuilder, Object)} should be used.
+   */
+  protected void onRequest(Span span, REQUEST request) {
+    onRequest(span::setAttribute, request);
+  }
+
+  private void onRequest(AttributeSetter setter, REQUEST request) {
+    assert setter != null;
+    if (request != null) {
+      setter.setAttribute(SemanticAttributes.NET_TRANSPORT, IP_TCP);
+      setter.setAttribute(SemanticAttributes.HTTP_METHOD, method(request));
+      setter.setAttribute(SemanticAttributes.HTTP_USER_AGENT, requestHeader(request, USER_AGENT));
+
+      setFlavor(setter, request);
+      setUrl(setter, request);
     }
   }
 
-  private void setFlavor(Span span, REQUEST request) {
+  private void setFlavor(AttributeSetter setter, REQUEST request) {
     String flavor = flavor(request);
     if (flavor == null) {
       return;
@@ -171,15 +176,29 @@ public abstract class HttpClientTracer<REQUEST, CARRIER, RESPONSE> extends BaseT
       flavor = flavor.substring(httpProtocolPrefix.length());
     }
 
-    span.setAttribute(SemanticAttributes.HTTP_FLAVOR, flavor);
+    setter.setAttribute(SemanticAttributes.HTTP_FLAVOR, flavor);
   }
 
-  private void setUrl(Span span, REQUEST request) {
+  private void setUrl(AttributeSetter setter, REQUEST request) {
     try {
       URI url = url(request);
       if (url != null) {
-        NetPeerUtils.INSTANCE.setNetPeer(span, url.getHost(), null, url.getPort());
-        span.setAttribute(SemanticAttributes.HTTP_URL, url.toString());
+        netPeerAttributes.setNetPeer(setter, url.getHost(), null, url.getPort());
+        final URI sanitized;
+        if (url.getUserInfo() != null) {
+          sanitized =
+              new URI(
+                  url.getScheme(),
+                  null,
+                  url.getHost(),
+                  url.getPort(),
+                  url.getPath(),
+                  url.getQuery(),
+                  url.getFragment());
+        } else {
+          sanitized = url;
+        }
+        setter.setAttribute(SemanticAttributes.HTTP_URL, sanitized.toString());
       }
     } catch (Exception e) {
       log.debug("Error tagging url", e);
@@ -192,7 +211,10 @@ public abstract class HttpClientTracer<REQUEST, CARRIER, RESPONSE> extends BaseT
       Integer status = status(response);
       if (status != null) {
         span.setAttribute(SemanticAttributes.HTTP_STATUS_CODE, (long) status);
-        span.setStatus(HttpStatusConverter.statusFromHttpStatus(status));
+        StatusCode statusCode = HttpStatusConverter.statusFromHttpStatus(status);
+        if (statusCode != StatusCode.UNSET) {
+          span.setStatus(statusCode);
+        }
       }
     }
   }

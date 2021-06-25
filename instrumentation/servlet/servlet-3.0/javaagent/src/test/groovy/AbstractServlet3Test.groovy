@@ -6,6 +6,7 @@
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.AUTH_REQUIRED
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.ERROR
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.EXCEPTION
+import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.INDEXED_CHILD
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.QUERY_PARAM
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.REDIRECT
 import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEndpoint.SUCCESS
@@ -13,9 +14,8 @@ import static io.opentelemetry.instrumentation.test.base.HttpServerTest.ServerEn
 import io.opentelemetry.instrumentation.test.AgentTestTrait
 import io.opentelemetry.instrumentation.test.asserts.TraceAssert
 import io.opentelemetry.instrumentation.test.base.HttpServerTest
+import io.opentelemetry.testing.internal.armeria.common.AggregatedHttpRequest
 import javax.servlet.Servlet
-import okhttp3.Request
-import okhttp3.RequestBody
 
 abstract class AbstractServlet3Test<SERVER, CONTEXT> extends HttpServerTest<SERVER> implements AgentTestTrait {
   @Override
@@ -42,14 +42,15 @@ abstract class AbstractServlet3Test<SERVER, CONTEXT> extends HttpServerTest<SERV
     addServlet(context, EXCEPTION.path, servlet)
     addServlet(context, REDIRECT.path, servlet)
     addServlet(context, AUTH_REQUIRED.path, servlet)
+    addServlet(context, INDEXED_CHILD.path, servlet)
   }
 
   protected ServerEndpoint lastRequest
 
   @Override
-  Request.Builder request(ServerEndpoint uri, String method, RequestBody body) {
+  AggregatedHttpRequest request(ServerEndpoint uri, String method) {
     lastRequest = uri
-    super.request(uri, method, body)
+    super.request(uri, method)
   }
 
   boolean errorEndpointUsesSendError() {

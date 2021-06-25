@@ -1,15 +1,17 @@
-apply from: "$rootDir/gradle/java.gradle"
+plugins {
+  id("otel.java-conventions")
+}
 
 dependencies {
   api project(':testing-common')
 
-  api group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.7'
+  api "org.apache.logging.log4j:log4j-core:2.7"
 
-  implementation deps.guava
+  implementation "com.google.guava:guava"
 
-  implementation deps.groovy
-  implementation deps.opentelemetryApi
-  implementation deps.spock
+  implementation "org.codehaus.groovy:groovy-all"
+  implementation "io.opentelemetry:opentelemetry-api"
+  implementation "org.spockframework:spock-core"
 
-  annotationProcessor group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.7'
+  annotationProcessor "org.apache.logging.log4j:log4j-core:2.7"
 }
