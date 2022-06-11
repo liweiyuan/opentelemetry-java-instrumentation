@@ -1,24 +1,24 @@
 ----------------------------------------------------------
- Run at Fri Jun 10 05:17:14 UTC 2022
+ Run at Sat Jun 11 05:15:09 UTC 2022
  release : compares no agent, latest stable, and latest snapshot agents
  5 users, 5000 iterations
 ----------------------------------------------------------
 Agent               :              none           latest         snapshot
-Run duration        :          00:00:02         00:00:02         00:00:02
-Avg. CPU (user) %   :       0.015151516      0.029761905      0.008460237
-Max. CPU (user) %   :       0.045454547       0.05952381       0.02538071
-Avg. mch tot cpu %  :        0.64375114        0.6138095        0.5520189
-Startup time (ms)   :             12748            15450            15338
-Total allocated MB  :           1361.30          2620.04          2856.90
+Run duration        :          00:00:03         00:00:03         00:00:05
+Avg. CPU (user) %   :       0.026636926       0.05030473      0.030439803
+Max. CPU (user) %   :        0.08629441       0.11557789        0.1573604
+Avg. mch tot cpu %  :         0.5893452       0.54720217       0.36022714
+Startup time (ms)   :             15708            17575            17667
+Total allocated MB  :           1297.30          2636.18          2827.11
 Min heap used (MB)  :  8796093022208.00 8796093022208.00 8796093022208.00
 Max heap used (MB)  : -8796093022208.00-8796093022208.00-8796093022208.00
 Thread switch rate  :               0.0              0.0              0.0
 GC time (ms)        :                 0                0                0
 GC pause time (ms)  :                 0                0                0
-Req. mean (ms)      :              4.77            15.35             9.75
-Req. p95 (ms)       :              4.77            15.35             9.75
-Iter. mean (ms)     :              0.06             0.05             0.05
-Iter. p95 (ms)      :              0.05             0.04             0.05
-Net read avg (bps)  :         382808.00            -1.00        434136.00
-Net write avg (bps) :         570624.00            -1.00       4635992.00
-Peak threads        :                34               43               43
+Req. mean (ms)      :             16.21             4.94             5.87
+Req. p95 (ms)       :             16.21             4.94             5.87
+Iter. mean (ms)     :              0.07             0.07             0.11
+Iter. p95 (ms)      :              0.09             0.05             0.06
+Net read avg (bps)  :         389368.00        448496.00        442480.00
+Net write avg (bps) :         560736.00       4652464.00       4640920.00
+Peak threads        :                33               44               42
